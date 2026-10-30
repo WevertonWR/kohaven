@@ -35,8 +35,9 @@ const App = {
       });
     }
 
-    // Render sidebar
+    // Render sidebar & mobile categories
     this.renderSidebar();
+    this.renderMobileMenu();
     
     // Load User Profile
     this.updateProfileUI();
@@ -51,10 +52,11 @@ const App = {
       this.navigate(page, false);
     });
 
-    // Keyboard shortcut: Escape to close modals
+    // Keyboard shortcut: Escape to close modals and mobile menu
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+        this.closeMobileMenu();
       }
     });
 
@@ -274,6 +276,103 @@ const App = {
     `;
   },
 
+  renderMobileMenu() {
+    const container = document.getElementById('mobile-categories-list');
+    if (!container) return;
+
+    const allKeys = ['dashboard', 'achievements', 'timer', 'habits', 'finances', 'goals', 'evolution', 'media', 'quotes', 'notes'];
+
+    container.innerHTML = allKeys.map(key => {
+      const route = this.routes[key];
+      if (!route) return '';
+      const isActive = this.currentPage === key;
+      const subtitle = this.getCategorySubtitle(key);
+      return `
+        <button class="mobile-cat-card ${isActive ? 'active' : ''}" 
+                onclick="App.navigateFromMobile('${key}')" 
+                data-key="${key}" 
+                data-label="${route.label.toLowerCase()} ${subtitle.toLowerCase()}">
+          <div class="mobile-cat-icon">
+            ${Utils.icons[route.icon] || ''}
+          </div>
+          <div class="mobile-cat-info">
+            <span class="mobile-cat-title">${route.label}</span>
+            <span class="mobile-cat-sub">${subtitle}</span>
+          </div>
+          ${isActive 
+            ? '<span class="mobile-cat-active-pill">Ativo</span>' 
+            : '<svg class="mobile-cat-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>'}
+        </button>
+      `;
+    }).join('');
+  },
+
+  getCategorySubtitle(key) {
+    const subtitles = {
+      dashboard: 'Visão Geral & Métricas',
+      achievements: 'Conquistas & Níveis',
+      timer: 'Pomodoro & Foco',
+      habits: 'Hábitos & Rotina',
+      finances: 'Controle Financeiro',
+      goals: 'Metas & Objetivos',
+      evolution: 'Gráficos & Progresso',
+      quotes: 'Frases Inspiradoras',
+      media: 'Livros, Filmes & Cursos',
+      notes: 'Bloco de Notas & Ideias'
+    };
+    return subtitles[key] || 'Módulo Korhaven';
+  },
+
+  navigateFromMobile(page) {
+    this.navigate(page);
+    this.closeMobileMenu();
+  },
+
+  filterMobileCategories(query) {
+    const q = (query || '').toLowerCase().trim();
+    const cards = document.querySelectorAll('.mobile-cat-card');
+    cards.forEach(card => {
+      const label = card.getAttribute('data-label') || '';
+      if (!q || label.includes(q)) {
+        card.style.display = 'flex';
+      } else {
+        card.style.display = 'none';
+      }
+    });
+  },
+
+  toggleMobileMenu() {
+    const drawer = document.getElementById('mobile-drawer');
+    const overlay = document.getElementById('mobile-drawer-overlay');
+    const btn = document.getElementById('mobile-menu-btn');
+    if (!drawer || !overlay) return;
+
+    const isOpen = drawer.classList.contains('open');
+    if (isOpen) {
+      this.closeMobileMenu();
+    } else {
+      this.renderMobileMenu();
+      this.updateProfileUI();
+      drawer.classList.add('open');
+      overlay.classList.add('open');
+      if (btn) btn.classList.add('open');
+      document.body.classList.add('mobile-drawer-open');
+
+      const search = document.getElementById('mobile-sidebar-search');
+      if (search) search.value = '';
+    }
+  },
+
+  closeMobileMenu() {
+    const drawer = document.getElementById('mobile-drawer');
+    const overlay = document.getElementById('mobile-drawer-overlay');
+    const btn = document.getElementById('mobile-menu-btn');
+    if (drawer) drawer.classList.remove('open');
+    if (overlay) overlay.classList.remove('open');
+    if (btn) btn.classList.remove('open');
+    document.body.classList.remove('mobile-drawer-open');
+  },
+
   navigate(page, updateHash = true) {
     if (!this.routes[page]) page = 'dashboard';
     this.currentPage = page;
@@ -282,15 +381,24 @@ const App = {
       window.location.hash = page;
     }
 
-    // Update active state
+    // Update active state in desktop
     document.querySelectorAll('.sidebar-nav-item').forEach(item => {
       item.classList.remove('active');
     });
     const activeItem = document.getElementById(`nav-${page}`);
     if (activeItem) activeItem.classList.add('active');
 
+    // Update active state in mobile menu
+    this.renderMobileMenu();
+
+    // Close mobile menu if open
+    this.closeMobileMenu();
+
     // Render page
     this.renderCurrentPage();
+
+    // Scroll to top on page switch
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   },
 
   renderCurrentPage() {
@@ -429,6 +537,23 @@ const App = {
         sbImg.style.display = 'none';
         sbInitial.style.display = 'block';
         sbInitial.textContent = name.charAt(0).toUpperCase();
+      }
+    }
+
+    // Update Mobile Drawer Profile
+    const mbName = document.getElementById('mobile-user-name');
+    const mbInitial = document.getElementById('mobile-avatar-initial');
+    const mbImg = document.getElementById('mobile-avatar-img');
+    if (mbName) mbName.textContent = name;
+    if (mbInitial && mbImg) {
+      if (avatar) {
+        mbImg.src = avatar;
+        mbImg.style.display = 'block';
+        mbInitial.style.display = 'none';
+      } else {
+        mbImg.style.display = 'none';
+        mbInitial.style.display = 'block';
+        mbInitial.textContent = name.charAt(0).toUpperCase();
       }
     }
 

@@ -177,6 +177,93 @@
           </div>
         </div>
       </div>
+
+      <!-- Mobile Controls (Visible only on Mobile <= 768px) -->
+      <div class="mobile-header-controls">
+        <button id="mobile-theme-btn" class="mobile-icon-btn" onclick="document.getElementById('theme-toggle').click()" aria-label="Alternar Tema" title="Alternar Tema">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+        </button>
+
+        <button class="mobile-menu-btn" id="mobile-menu-btn" onclick="App.toggleMobileMenu()" aria-label="Abrir Menu de Categorias">
+          <span class="hamburger-bar"></span>
+          <span class="hamburger-bar"></span>
+          <span class="hamburger-bar"></span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Mobile Drawer Overlay & Drawer -->
+    <div class="mobile-drawer-overlay" id="mobile-drawer-overlay" onclick="App.closeMobileMenu()"></div>
+    <aside class="mobile-drawer" id="mobile-drawer" aria-label="Menu de Categorias">
+      <div class="mobile-drawer-header">
+        <div style="display: flex; align-items: center; gap: var(--space-3);">
+          <div class="logo-wrapper" style="height: 38px; width: 38px; position: relative; flex-shrink: 0;">
+            <div class="logo-gradient" style="position: absolute; inset: 0;"></div>
+            <img src="assets/logo.png" alt="Logo" class="logo-img" style="height: 100%; width: 100%; object-fit: contain;">
+          </div>
+          <div>
+            <div style="font-weight: 800; font-size: 1.05rem; color: var(--text-primary); letter-spacing: 1px;">KORHAVEN</div>
+            <div style="font-size: 0.65rem; color: var(--accent); letter-spacing: 1.5px; text-transform: uppercase;">Categorias</div>
+          </div>
+        </div>
+        <button class="mobile-drawer-close" onclick="App.closeMobileMenu()" aria-label="Fechar Menu">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="mobile-drawer-search">
+        <div class="sidebar-search-wrapper" style="width: 100%;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" class="sidebar-search-input" style="width: 100%;" placeholder="Filtrar categorias..." id="mobile-sidebar-search" oninput="App.filterMobileCategories(this.value)">
+        </div>
+      </div>
+
+      <div class="mobile-drawer-content">
+        <div class="mobile-section-heading">ESCOLHA UMA CATEGORIA</div>
+        <div class="mobile-categories-list" id="mobile-categories-list">
+          <!-- Rendered by App.renderMobileMenu() -->
+        </div>
+      </div>
+
+      <div class="mobile-drawer-footer">
+        <div class="mobile-drawer-user" onclick="App.closeMobileMenu(); App.openProfile();">
+          <div class="sidebar-user-avatar" id="mobile-avatar-avatar" style="width: 38px; height: 38px; flex-shrink: 0;">
+            <span id="mobile-avatar-initial">K</span>
+            <img id="mobile-avatar-img" src="" style="width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; display: none;">
+          </div>
+          <div class="sidebar-user-info" style="flex: 1;">
+            <div class="sidebar-user-name" id="mobile-user-name" style="font-weight: 700; font-size: 0.95rem; color: var(--text-primary);">Korhaven</div>
+            <div class="sidebar-user-status" style="font-size: 0.75rem; color: var(--text-muted);">Configurações e Perfil</div>
+          </div>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-muted);">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </div>
+        
+        <button class="btn btn-primary" id="mobile-install-btn" style="width: 100%; justify-content: center; gap: var(--space-2); margin-top: var(--space-3); background: linear-gradient(135deg, var(--accent), #8b5cf6);" onclick="App.closeMobileMenu(); PWA.promptInstall();">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+            <line x1="12" y1="18" x2="12.01" y2="18"></line>
+          </svg>
+          Instalar no Celular
+        </button>
+      </div>
     </aside>
 
     <!-- Main Content -->
