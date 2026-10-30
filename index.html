@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="description" content="KORHAVEN — Dashboard pessoal de produtividade, finanças, hábitos, metas e evolução pessoal. Organize sua vida em um só lugar.">
+  <meta name="theme-color" content="#08090C">
+
+  <!-- PWA Manifest & iOS Meta Tags -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Korhaven">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <title>KORHAVEN — Life Dashboard</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/variables.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/modules.css">
+
+  <!-- Favicon (inline SVG) -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+</head>
+<body>
+  <!-- Global Background Particles -->
+  <canvas id="bg-particles" class="bg-particles"></canvas>
+  
+  <!-- Global SVG Defs for Premium Icons -->
+  <svg width="0" height="0" style="position:absolute; visibility:hidden;">
+    <defs>
+      <linearGradient id="neon-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#a78bfa" />
+        <stop offset="100%" stop-color="#536DFF" />
+      </linearGradient>
+      <linearGradient id="neon-grad-success" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#34d399" />
+        <stop offset="100%" stop-color="#059669" />
+      </linearGradient>
+      <linearGradient id="neon-grad-warning" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#fbbf24" />
+        <stop offset="100%" stop-color="#d97706" />
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <!-- Splash / Loading Screen -->
+  <div id="splash-screen" class="splash-screen">
+    <canvas id="splash-particles" class="splash-particles"></canvas>
+    <div class="splash-animation-wrapper" id="splash-wrapper">
+      <div class="logo-wrapper splash-logo-animated" style="position: relative; z-index: 2; height: 140px; width: 140px;">
+        <div class="logo-gradient" style="position: absolute; inset: 0;"></div>
+        <img src="assets/logo.png" alt="Logo" class="logo-img" style="position: relative; height: 100%; width: 100%; object-fit: contain; z-index: 1;">
+      </div>
+      <div class="splash-text-mask">
+        <div class="splash-text-group">
+          <h1 class="splash-title-animated">KORHAVEN</h1>
+          <h2 class="splash-subtitle-animated">DASHBOARD</h2>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auth Screen (Login / Register) -->
+  <div id="auth-screen" class="auth-screen hidden">
+    <div class="auth-container">
+      <img src="assets/logo.png" alt="Korhaven" class="auth-logo">
+      <h2 class="auth-title" id="auth-title">Bem-vindo</h2>
+      <p class="auth-subtitle" id="auth-subtitle">Faça login para continuar</p>
+      
+      <!-- Register Form -->
+      <div id="auth-register-form" style="display: none;">
+        <div class="auth-form-group">
+          <label class="form-label">Como devemos chamar você?</label>
+          <input type="text" id="auth-reg-name" class="auth-input" placeholder="Seu nome">
+        </div>
+        <div class="auth-form-group">
+          <label class="form-label">Seu Email</label>
+          <input type="email" id="auth-reg-email" class="auth-input" placeholder="seu@email.com">
+        </div>
+        <div class="auth-form-group">
+          <label class="form-label">Crie uma Senha Local</label>
+          <input type="password" id="auth-reg-pass" class="auth-input" placeholder="Senha">
+        </div>
+        <button class="btn btn-primary" style="width: 100%; justify-content: center; padding: var(--space-4);" onclick="App.handleRegister()">Criar Conta e Entrar</button>
+      </div>
+
+      <!-- Login Form -->
+      <div id="auth-login-form" style="display: none;">
+        <div class="auth-form-group">
+          <label class="form-label">Email de Acesso</label>
+          <input type="email" id="auth-login-email" class="auth-input" placeholder="seu@email.com">
+        </div>
+        <div class="auth-form-group">
+          <label class="form-label">Senha de Acesso</label>
+          <input type="password" id="auth-login-pass" class="auth-input" placeholder="Senha">
+        </div>
+        <button class="btn btn-primary" style="width: 100%; justify-content: center; padding: var(--space-4);" onclick="App.handleLogin()">Entrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-layout">
+
+    <!-- Topbar (formerly Sidebar) -->
+    <aside class="sidebar" id="sidebar">
+      <!-- Logo -->
+      <div class="sidebar-header">
+        <div class="sidebar-logo" style="display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) 0;">
+          <div class="logo-wrapper" style="position: relative; height: 44px; width: 44px; transform: scale(1.2); flex-shrink: 0;">
+            <div class="logo-gradient" style="position: absolute; inset: 0;"></div>
+            <img src="assets/logo.png" alt="Logo" class="logo-img" style="position: relative; height: 100%; width: 100%; object-fit: contain; z-index: 1;">
+          </div>
+          <div style="line-height: 1.2;">
+            <div class="sidebar-logo-text" style="font-size: 1.1rem; font-weight: 800; letter-spacing: 1px; color: var(--text-primary);">KORHAVEN</div>
+            <div class="sidebar-logo-sub" style="font-size: 0.65rem; color: var(--accent); text-transform: uppercase; letter-spacing: 2px; margin-top: 2px;">Dashboard</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Navigation -->
+      <nav class="sidebar-nav" id="sidebar-nav">
+        <!-- Rendered by App.renderSidebar() -->
+      </nav>
+
+      <!-- Search -->
+      <div class="sidebar-search">
+        <div class="sidebar-search-wrapper">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" class="sidebar-search-input" placeholder="Buscar..." id="sidebar-search">
+        </div>
+      </div>
+
+      <!-- Footer / User -->
+      <div class="sidebar-footer" style="flex-direction: column; gap: var(--space-3);">
+        <button id="pwa-install-btn" class="btn btn-primary" style="display: none; width: 100%; justify-content: center; gap: var(--space-2); background: linear-gradient(135deg, var(--accent), #8b5cf6);" onclick="PWA.promptInstall()">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+            <line x1="12" y1="18" x2="12.01" y2="18"></line>
+          </svg>
+          Instalar App
+        </button>
+        <button id="theme-toggle" class="btn btn-secondary" style="width: 100%; justify-content: center; gap: var(--space-2);">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+          Alternar Tema
+        </button>
+        <div class="sidebar-user" onclick="App.openProfile()" style="cursor: pointer; transition: background 0.2s; border-radius: 8px;">
+          <div class="sidebar-user-avatar" id="sidebar-user-avatar" style="overflow: hidden; position: relative; display: flex; align-items: center; justify-content: center;">
+            <span id="sidebar-avatar-initial">K</span>
+            <img id="sidebar-avatar-img" src="" style="width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; display: none;">
+          </div>
+          <div class="sidebar-user-info" style="display: flex; flex-direction: column; text-align: left;">
+            <div class="sidebar-user-name" id="sidebar-user-name" style="font-weight: 700; font-size: 0.9rem; color: var(--text-primary);">Korhaven</div>
+            <div class="sidebar-user-status" style="font-size: 0.75rem; color: var(--text-muted);">Visitar perfil</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content" id="main-content">
+      <!-- Rendered by App.renderCurrentPage() -->
+    </main>
+
+  </div>
+
+  <!-- Profile Settings Modal -->
+  <div class="modal-overlay" id="profile-modal">
+    <div class="modal" style="max-width: 500px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Perfil e Configurações</h3>
+        <button class="modal-close" onclick="App.closeProfile()">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div style="display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-6);">
+          <div style="width: 64px; height: 64px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: bold; overflow: hidden; border: 2px solid var(--accent); flex-shrink: 0; position: relative;">
+            <span id="profile-modal-initial">K</span>
+            <img id="profile-modal-img" src="" style="width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; display: none;">
+          </div>
+          <div style="display: flex; flex-direction: column; gap: var(--space-2);">
+            <label class="btn btn-secondary" style="cursor: pointer; padding: var(--space-2) var(--space-4); font-size: var(--font-sm);">
+              Alterar Foto
+              <input type="file" id="profile-avatar-input" accept="image/*" style="display: none;" onchange="App.handleAvatarUpload(event)">
+            </label>
+            <button class="btn btn-secondary" style="padding: var(--space-2) var(--space-4); font-size: var(--font-sm); display: none; color: var(--danger); border-color: rgba(248, 113, 113, 0.2);" id="profile-avatar-remove" onclick="App.removeAvatar()">Remover Foto</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Nome do Usuário</label>
+          <input type="text" class="form-input" id="profile-name-input" placeholder="Seu nome">
+        </div>
+        
+        <div class="form-group">
+          <label class="form-label">Email de Acesso</label>
+          <input type="email" class="form-input" id="profile-email-input" placeholder="seu@email.com">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Nova Senha</label>
+          <input type="password" class="form-input" id="profile-pass-input" placeholder="Deixe em branco para não alterar">
+        </div>
+
+        <!-- PWA & Mobile Notifications Section -->
+        <div style="margin-top: var(--space-6); border-top: 1px solid var(--border); padding-top: var(--space-4);">
+          <h4 style="font-size: var(--font-base); font-weight: var(--fw-semibold); margin-bottom: var(--space-2); color: var(--text-primary); display: flex; align-items: center; gap: var(--space-2);">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+              <line x1="12" y1="18" x2="12.01" y2="18"></line>
+            </svg>
+            Aplicativo & Notificações
+          </h4>
+          <p style="font-size: var(--font-sm); color: var(--text-muted); margin-bottom: var(--space-3);">
+            Instale o Korhaven como app no seu celular e receba lembretes de hábitos e metas na barra de notificações.
+          </p>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); font-size: var(--font-xs);">
+            <span>Status:</span>
+            <span id="pwa-notif-status" style="font-weight: 600;">Verificando...</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: var(--space-2);">
+            <button class="btn btn-secondary" id="pwa-notif-btn" onclick="PWA.requestAndTestNotification()" style="justify-content: center; gap: var(--space-2);">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+              </svg>
+              Ativar & Testar Notificação
+            </button>
+            <button class="btn btn-secondary" onclick="PWA.promptInstall()" style="justify-content: center; gap: var(--space-2);">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              Como Instalar no Celular
+            </button>
+          </div>
+        </div>
+
+        <div style="margin-top: var(--space-8); border-top: 1px solid var(--border); padding-top: var(--space-4);">
+          <h4 style="font-size: var(--font-base); font-weight: var(--fw-semibold); margin-bottom: var(--space-4); color: var(--text-secondary);">Gerenciamento de Dados</h4>
+          <p style="font-size: var(--font-sm); color: var(--text-muted); margin-bottom: var(--space-4);">Você pode exportar seus dados para fazer um backup seguro e importá-los quando precisar.</p>
+          
+          <div style="display: flex; gap: var(--space-3); margin-bottom: var(--space-4);">
+            <button class="btn btn-secondary" onclick="App.exportData()" style="flex: 1; justify-content: center;">Exportar (Backup)</button>
+            <input type="file" id="import-file" style="display: none;" accept=".json" onchange="App.importData(event)">
+            <button class="btn btn-secondary" onclick="document.getElementById('import-file').click()" style="flex: 1; justify-content: center;">Importar</button>
+          </div>
+
+          <div style="margin-top: var(--space-6); padding: var(--space-4); border: 1px solid rgba(248, 113, 113, 0.2); background: rgba(248, 113, 113, 0.05); border-radius: var(--radius-md);">
+            <h5 style="color: var(--danger); font-size: var(--font-sm); margin-bottom: var(--space-2);">Zona de Perigo</h5>
+            <button class="btn" onclick="App.wipeData()" style="width: 100%; justify-content: center; background: var(--danger-soft); color: var(--danger); border: 1px solid var(--danger);">Apagar Todos os Dados</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="App.closeProfile()">Cancelar</button>
+        <button class="btn btn-primary" onclick="App.saveProfile()">Salvar Perfil</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Global Confirm Modal -->
+  <div class="modal-overlay" id="global-confirm-modal" style="z-index: 1000;">
+    <div class="modal" style="max-width: 400px; text-align: center; padding-top: var(--space-8);">
+      <div style="font-size: 3rem; margin-bottom: var(--space-4); color: var(--danger);">⚠️</div>
+      <h3 class="modal-title" style="margin-bottom: var(--space-4); font-size: var(--font-lg);">Atenção</h3>
+      <p id="global-confirm-msg" style="color: var(--text-secondary); margin-bottom: var(--space-8); line-height: 1.5;"></p>
+      <div class="modal-footer" style="justify-content: center; border-top: none;">
+        <button class="btn btn-secondary" onclick="Utils.closeConfirm()">Cancelar</button>
+        <button class="btn btn-primary" id="global-confirm-btn" style="background: var(--danger); border-color: var(--danger); color: white; box-shadow: 0 0 10px rgba(248, 113, 113, 0.4);">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Global Prompt Modal -->
+  <div class="modal-overlay" id="global-prompt-modal" style="z-index: 1000;">
+    <div class="modal" style="max-width: 400px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="global-prompt-title">Prompt</h3>
+        <button class="modal-close" onclick="Utils.closePrompt()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p id="global-prompt-msg" style="margin-bottom: var(--space-3); color: var(--text-secondary);"></p>
+        <input type="text" id="global-prompt-input" class="form-input" style="width: 100%;">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="Utils.closePrompt()">Cancelar</button>
+        <button class="btn btn-primary" id="global-prompt-btn">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Scripts (order matters: utils & store first, then modules, then app) -->
+  <script src="js/store.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/achievements.js"></script>
+  <script src="js/timer.js"></script>
+  <script src="js/quotes.js"></script>
+  <script src="js/habits.js"></script>
+  <script src="js/finances.js"></script>
+  <script src="js/goals.js"></script>
+  <script src="js/evolution.js"></script>
+  <script src="js/media.js"></script>
+  <script src="js/notes.js"></script>
+  <script src="js/pwa.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
