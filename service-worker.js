@@ -1,5 +1,5 @@
 // KORHAVEN — Service Worker
-const CACHE_NAME = 'korhaven-v2.1';
+const CACHE_NAME = 'korhaven-v2.3';
 
 const PRECACHE_ASSETS = [
   './',

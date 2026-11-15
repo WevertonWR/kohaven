@@ -1294,7 +1294,7 @@ ${n.content || 'Nenhuma descrição adicionada.'}
       if (notifyToggle && notifyToggle.checked) {
         data.reminder = {
           enabled: true,
-          date: document.getElementById('fixa-notify-date').value,
+          date: document.getElementById('fixa-notify-date').value || Utils.today(),
           time: document.getElementById('fixa-notify-time').value || '09:00',
           message: document.getElementById('fixa-notify-msg').value.trim() || title
         };
@@ -1352,7 +1352,7 @@ ${n.content || 'Nenhuma descrição adicionada.'}
       if (notifyToggle && notifyToggle.checked) {
         data.reminder = {
           enabled: true,
-          date: document.getElementById('prolongada-notify-date').value,
+          date: document.getElementById('prolongada-notify-date').value || Utils.today(),
           time: document.getElementById('prolongada-notify-time').value || '14:00',
           message: document.getElementById('prolongada-notify-message').value.trim() || title
         };
@@ -1369,6 +1369,7 @@ ${n.content || 'Nenhuma descrição adicionada.'}
     }
 
     Store.notes.save(data);
+    if (window.PWA && typeof PWA.checkReminders === 'function') PWA.checkReminders();
     this.closeModal();
     Utils.toast(editId ? 'Anotação atualizada com sucesso!' : 'Anotação salva com sucesso!', 'success');
     App.renderCurrentPage();

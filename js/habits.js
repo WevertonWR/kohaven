@@ -685,6 +685,7 @@ const Habits = {
     }
 
     Store.habits.save(data);
+    if (window.PWA && typeof PWA.checkReminders === 'function') PWA.checkReminders();
     this.closeModal();
     Utils.toast(editId ? 'Hábito atualizado!' : 'Hábito criado! ✅', 'success');
     App.renderCurrentPage();

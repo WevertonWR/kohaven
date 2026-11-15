@@ -245,6 +245,13 @@ const Haven = {
     this._processMessage(text, fromVoice);
   },
 
+  _sendVoiceTranscript(text) {
+    const clean = (text || '').trim();
+    if (!clean) return;
+    this._addUserMessage(clean);
+    this._processMessage(clean, true);
+  },
+
   handleInputKeydown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -1204,6 +1211,7 @@ const Haven = {
     if (this._isListening) {
       this.stopVoice();
     } else {
+      this.stopSpeaking();
       this.startVoice();
     }
   },
@@ -1216,6 +1224,9 @@ const Haven = {
       return;
     }
 
+    this._voiceTranscript = '';
+    this._voiceSent = false;
+
     this._recognition = new SpeechRecognition();
     this._recognition.lang = 'pt-BR';
     this._recognition.interimResults = true;
@@ -1226,34 +1237,34 @@ const Haven = {
       this._isListening = true;
       const orb = document.getElementById('haven-mic-orb');
       if (orb) orb.classList.add('is-listening');
-      const input = document.getElementById('haven-text-input');
-      if (input) input.placeholder = '🎤 Ouvindo... Fale agora!';
       if (typeof HavenOrb !== 'undefined') HavenOrb.setState('listening');
     };
 
     this._recognition.onresult = (event) => {
-      let transcript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
+      let full = '';
+      for (let i = 0; i < event.results.length; i++) {
+        full += event.results[i][0].transcript;
       }
-      
-      const input = document.getElementById('haven-text-input');
-      if (input) {
-        input.value = transcript;
-        this.autoResizeInput();
+      this._voiceTranscript = full.trim();
+
+      // Mostrar prévia ao vivo só no status do orbe (sem jogar texto na caixinha)
+      const stateText = document.getElementById('haven-orb-state-text');
+      if (stateText && this._voiceTranscript) {
+        stateText.textContent = `“${this._voiceTranscript}”`;
       }
 
-      // Se é resultado final, envia automaticamente e responde com voz
-      if (event.results[event.results.length - 1].isFinal) {
-        this._currentTranscript = transcript;
-        setTimeout(() => {
-          this.sendMessage(true);
-        }, 400);
+      const last = event.results[event.results.length - 1];
+      if (last && last.isFinal && this._voiceTranscript && !this._voiceSent) {
+        this._voiceSent = true;
+        const finalText = this._voiceTranscript;
+        this.stopVoice();
+        this._sendVoiceTranscript(finalText);
       }
     };
 
     this._recognition.onerror = (event) => {
       console.error('Speech recognition error:', event.error);
+      this._voiceSent = true;
       this.stopVoice();
 
       if (event.error === 'not-allowed') {
@@ -1264,12 +1275,18 @@ const Haven = {
     };
 
     this._recognition.onend = () => {
+      const pending = (this._voiceTranscript || '').trim();
+      const alreadySent = this._voiceSent;
       this.stopVoice();
+      // No celular, muitos navegadores encerram sem marcar isFinal — enviar direto aqui
+      if (!alreadySent && pending) {
+        this._voiceSent = true;
+        this._sendVoiceTranscript(pending);
+      }
     };
 
     try {
       this._recognition.start();
-      Utils.toast('🎤 Haven está ouvindo...', 'success');
     } catch (e) {
       Utils.toast('Erro ao iniciar reconhecimento de voz.', 'error');
     }
@@ -1285,8 +1302,6 @@ const Haven = {
     const orb = document.getElementById('haven-mic-orb');
     if (orb) orb.classList.remove('is-listening');
 
-    const input = document.getElementById('haven-text-input');
-    if (input) input.placeholder = 'Digite uma mensagem para o Haven...';
     if (typeof HavenOrb !== 'undefined' && !this._isProcessing) HavenOrb.setState('idle');
   },
 

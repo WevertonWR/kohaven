@@ -118,15 +118,30 @@ const PWA = {
   },
 
   async requestAndTestNotification() {
+    if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      if (typeof Utils !== 'undefined') {
+        Utils.toast('Notificações no celular exigem HTTPS (ou localhost). Abra pelo link HTTPS do app.', 'warning');
+      }
+      return;
+    }
+
     if (!('Notification' in window)) {
       if (typeof Utils !== 'undefined') {
-        Utils.toast('Seu dispositivo ou navegador não suporta a API de notificações.', 'warning');
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        Utils.toast(
+          isIOS
+            ? 'No iPhone, instale o app na Tela de Início (Compartilhar → Adicionar à Tela de Início) para ativar notificações.'
+            : 'Seu dispositivo ou navegador não suporta notificações.',
+          'warning'
+        );
       }
       return;
     }
 
     try {
-      const permission = await Notification.requestPermission();
+      const permission = Notification.permission === 'granted'
+        ? 'granted'
+        : await Notification.requestPermission();
       this.updateNotificationUI();
 
       if (permission === 'granted') {
@@ -139,7 +154,7 @@ const PWA = {
         );
       } else {
         if (typeof Utils !== 'undefined') {
-          Utils.toast('Permissão de notificação não foi concedida.', 'warning');
+          Utils.toast('Permissão de notificação bloqueada. Libere nas configurações do navegador.', 'warning');
         }
       }
     } catch (err) {
@@ -147,7 +162,12 @@ const PWA = {
     }
   },
 
-  async sendNotification(title, body, url = './', noteId = null) {
+  async sendNotification(title, body, url = './', noteId = null, tag = null) {
+    // Sempre mostrar aviso visual dentro do app também
+    if (typeof Utils !== 'undefined') {
+      Utils.toast(`${title}: ${body || ''}`, 'info');
+    }
+
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
     const options = {
@@ -155,14 +175,22 @@ const PWA = {
       icon: 'assets/icon-192.png',
       badge: 'assets/icon-192.png',
       vibrate: [200, 100, 200],
+      renotify: true,
+      tag: tag || `korhaven_${Date.now()}`,
       data: { url: url, noteId: noteId }
     };
 
     if ('serviceWorker' in navigator) {
       try {
-        const registration = await navigator.serviceWorker.ready;
-        registration.showNotification(title, options);
-        return;
+        const reg = await navigator.serviceWorker.getRegistration();
+        const readyReg = reg || await Promise.race([
+          navigator.serviceWorker.ready,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('SW_TIMEOUT')), 1500))
+        ]);
+        if (readyReg && typeof readyReg.showNotification === 'function') {
+          await readyReg.showNotification(title, options);
+          return;
+        }
       } catch (e) {
         console.warn('[PWA] Fallback para notificação direta:', e);
       }
@@ -177,11 +205,80 @@ const PWA = {
 
   // Active Reminder Engine for Habits & Notes
   _triggeredReminders: {},
+  _scheduledTimers: [],
+
+  _loadTriggeredReminders() {
+    try {
+      const raw = localStorage.getItem('korhaven_triggered_reminders');
+      const parsed = raw ? JSON.parse(raw) : {};
+      const todayStr = this._getLocalTodayStr();
+      // Manter apenas chaves do dia atual para não crescer indefinidamente
+      const cleaned = {};
+      Object.keys(parsed).forEach(k => {
+        if (k.includes(`_${todayStr}_`)) cleaned[k] = true;
+      });
+      this._triggeredReminders = cleaned;
+    } catch (e) {
+      this._triggeredReminders = {};
+    }
+  },
+
+  _markTriggered(key) {
+    this._triggeredReminders[key] = true;
+    try {
+      localStorage.setItem('korhaven_triggered_reminders', JSON.stringify(this._triggeredReminders));
+    } catch (e) {}
+  },
+
+  _getLocalTodayStr(now = new Date()) {
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  },
+
+  _normalizeTime(timeStr) {
+    if (!timeStr || typeof timeStr !== 'string') return '';
+    const m = timeStr.trim().match(/^(\d{1,2}):(\d{1,2})/);
+    if (!m) return '';
+    return `${m[1].padStart(2, '0')}:${m[2].padStart(2, '0')}`;
+  },
+
+  _toMinutes(timeStr) {
+    const norm = this._normalizeTime(timeStr);
+    if (!norm) return -1;
+    const [h, m] = norm.split(':').map(Number);
+    return h * 60 + m;
+  },
 
   startReminderEngine() {
-    // Check reminders immediately and every 25 seconds
+    this._loadTriggeredReminders();
     this.checkReminders();
-    setInterval(() => this.checkReminders(), 25000);
+    setInterval(() => this.checkReminders(), 20000);
+
+    // No celular, ao voltar para o app / desbloquear tela, verificar lembretes perdidos imediatamente
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) this.checkReminders();
+    });
+    window.addEventListener('focus', () => this.checkReminders());
+  },
+
+  _clearScheduledTimers() {
+    this._scheduledTimers.forEach(id => clearTimeout(id));
+    this._scheduledTimers = [];
+  },
+
+  _scheduleAtMinute(targetTimeStr) {
+    const now = new Date();
+    const norm = this._normalizeTime(targetTimeStr);
+    if (!norm) return;
+    const [th, tm] = norm.split(':').map(Number);
+    const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), th, tm, 1, 0);
+    const diff = target.getTime() - now.getTime();
+    if (diff > 0 && diff <= 12 * 3600 * 1000) {
+      const id = setTimeout(() => this.checkReminders(), diff);
+      this._scheduledTimers.push(id);
+    }
   },
 
   checkReminders() {
@@ -195,37 +292,39 @@ const PWA = {
       }
     }
 
-    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    this._clearScheduledTimers();
 
     const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
-    const currentDay = String(now.getDate()).padStart(2, '0');
-    const todayStr = `${currentYear}-${currentMonth}-${currentDay}`;
-
-    const currentHours = String(now.getHours()).padStart(2, '0');
-    const currentMinutes = String(now.getMinutes()).padStart(2, '0');
-    const currentTimeStr = `${currentHours}:${currentMinutes}`;
+    const todayStr = this._getLocalTodayStr(now);
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
     const dayOfWeek = now.getDay(); // 0-6
+    const GRACE_MINUTES = 180; // Recuperar notificações perdidas em até 3h quando o app estava minimizado no celular
 
     // 1. Check Habits Reminders
     try {
       const habits = Store.habits ? Store.habits.getAll() : [];
       habits.forEach(h => {
         if (!h.reminder || !h.reminder.enabled) return;
-        const targetTime = h.reminder.time;
+        const targetTime = this._normalizeTime(h.reminder.time);
+        const targetMinutes = this._toMinutes(targetTime);
         const targetDays = Array.isArray(h.reminder.days) ? h.reminder.days : [0,1,2,3,4,5,6];
+        if (!targetTime || targetMinutes < 0 || !targetDays.includes(dayOfWeek)) return;
 
-        if (targetDays.includes(dayOfWeek) && targetTime === currentTimeStr) {
-          const triggerKey = `habit_${h.id}_${todayStr}_${currentTimeStr}`;
+        const diff = nowMinutes - targetMinutes;
+        if (diff >= 0 && diff <= GRACE_MINUTES) {
+          const triggerKey = `habit_${h.id}_${todayStr}_${targetTime}`;
           if (!this._triggeredReminders[triggerKey]) {
-            this._triggeredReminders[triggerKey] = true;
+            this._markTriggered(triggerKey);
             this.sendNotification(
               `⚡ Lembrete: ${h.name}`,
               `Hora de cumprir seu hábito de hoje! Mantenha o streak ativo.`,
-              '#habits'
+              '#habits',
+              null,
+              triggerKey
             );
           }
+        } else if (diff < 0) {
+          this._scheduleAtMinute(targetTime);
         }
       });
     } catch (err) {
@@ -239,14 +338,17 @@ const PWA = {
         if (n.expired || n.category === 'Expiradas') return;
         const reminder = n.reminder || {};
         if (!reminder.enabled) return;
-        const targetDate = reminder.date;
-        const targetTime = reminder.time;
+        const targetDate = reminder.date || n.date || todayStr;
+        const targetTime = this._normalizeTime(reminder.time);
+        const targetMinutes = this._toMinutes(targetTime);
+        if (targetDate !== todayStr || !targetTime || targetMinutes < 0) return;
 
-        if (targetDate === todayStr && targetTime === currentTimeStr) {
-          const triggerKey = `note_${n.id}_${todayStr}_${currentTimeStr}`;
+        const diff = nowMinutes - targetMinutes;
+        if (diff >= 0 && diff <= GRACE_MINUTES) {
+          const triggerKey = `note_${n.id}_${todayStr}_${targetTime}`;
           if (!this._triggeredReminders[triggerKey]) {
-            this._triggeredReminders[triggerKey] = true;
-            
+            this._markTriggered(triggerKey);
+
             let title = `📌 Alerta: ${n.title}`;
             let message = reminder.message || `Lembrete agendado: ${n.title}`;
 
@@ -270,9 +372,12 @@ const PWA = {
               title,
               message,
               `./#notes?noteId=${encodeURIComponent(n.id)}`,
-              n.id
+              n.id,
+              triggerKey
             );
           }
+        } else if (diff < 0) {
+          this._scheduleAtMinute(targetTime);
         }
       });
     } catch (err) {
