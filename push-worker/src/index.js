@@ -174,6 +174,13 @@ async function sendWebPush(subscription, payloadObj, env) {
   return res.status;
 }
 
+function toMinutes(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string') return -1;
+  const m = timeStr.trim().match(/^(\d{1,2}):(\d{1,2})/);
+  if (!m) return -1;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+
 function getLocalClock(timezoneOffsetMinutes) {
   // timezoneOffsetMinutes: ex. -180 para Brasília (UTC-3)
   const now = new Date(Date.now() + timezoneOffsetMinutes * 60000);
@@ -185,6 +192,7 @@ function getLocalClock(timezoneOffsetMinutes) {
   return {
     todayStr: `${y}-${m}-${d}`,
     timeStr: `${hh}:${mm}`,
+    nowMinutes: now.getUTCHours() * 60 + now.getUTCMinutes(),
     dayOfWeek: now.getUTCDay()
   };
 }
@@ -240,18 +248,37 @@ export default {
       return jsonResponse({ ok: status >= 200 && status < 300, status });
     }
 
+    if (request.method === 'GET' && url.pathname === '/status') {
+      const deviceId = url.searchParams.get('deviceId') || '';
+      const lastCron = await env.KORHAVEN_PUSH_KV.get('meta:last_cron', { type: 'json' });
+      const record = deviceId
+        ? await env.KORHAVEN_PUSH_KV.get(`device:${deviceId}`, { type: 'json' })
+        : null;
+      return jsonResponse({
+        ok: true,
+        lastCron,
+        device: record ? {
+          updatedAt: record.updatedAt,
+          timezoneOffset: record.timezoneOffset,
+          reminders: record.reminders || []
+        } : null
+      });
+    }
+
     return jsonResponse({ ok: true, service: 'korhaven-push' });
   },
 
   async scheduled(event, env) {
     if (!env.KORHAVEN_PUSH_KV || !env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) return;
 
+    await env.KORHAVEN_PUSH_KV.put('meta:last_cron', JSON.stringify({ at: Date.now() }));
+
     const list = await env.KORHAVEN_PUSH_KV.list({ prefix: 'device:' });
     for (const item of list.keys) {
       const record = await env.KORHAVEN_PUSH_KV.get(item.name, { type: 'json' });
       if (!record || !record.subscription || !Array.isArray(record.reminders)) continue;
 
-      const { todayStr, timeStr, dayOfWeek } = getLocalClock(record.timezoneOffset ?? -180);
+      const { todayStr, nowMinutes, dayOfWeek } = getLocalClock(record.timezoneOffset ?? -180);
       const sentKeys = {};
       for (const [k, v] of Object.entries(record.sentKeys || {})) {
         if (k.includes(`_${todayStr}_`)) sentKeys[k] = v;
@@ -261,8 +288,10 @@ export default {
       for (const rem of record.reminders) {
         if (rem.kind === 'habit') {
           const days = Array.isArray(rem.days) ? rem.days : [0, 1, 2, 3, 4, 5, 6];
-          if (!days.includes(dayOfWeek) || rem.time !== timeStr) continue;
-          const sentKey = `habit_${rem.id}_${todayStr}_${timeStr}`;
+          const targetMin = toMinutes(rem.time);
+          const diff = nowMinutes - targetMin;
+          if (!days.includes(dayOfWeek) || targetMin < 0 || diff < 0 || diff > 2) continue;
+          const sentKey = `habit_${rem.id}_${todayStr}_${rem.time}`;
           if (sentKeys[sentKey]) continue;
 
           const status = await sendWebPush(
@@ -278,8 +307,10 @@ export default {
           sentKeys[sentKey] = true;
           dirty = true;
         } else if (rem.kind === 'note') {
-          if (rem.date !== todayStr || rem.time !== timeStr) continue;
-          const sentKey = `note_${rem.id}_${todayStr}_${timeStr}`;
+          const targetMin = toMinutes(rem.time);
+          const diff = nowMinutes - targetMin;
+          if (rem.date !== todayStr || targetMin < 0 || diff < 0 || diff > 2) continue;
+          const sentKey = `note_${rem.id}_${todayStr}_${rem.time}`;
           if (sentKeys[sentKey]) continue;
 
           const status = await sendWebPush(

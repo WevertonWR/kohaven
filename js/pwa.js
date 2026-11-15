@@ -540,21 +540,35 @@ const PWA = {
     const reg = (await navigator.serviceWorker.getRegistration()) || await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
     if (!sub) {
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: this._urlBase64ToUint8Array(publicKey)
-      });
+      try {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: this._urlBase64ToUint8Array(publicKey)
+        });
+      } catch (subErr) {
+        const msg = String(subErr && subErr.message || subErr || '');
+        if (/push service error/i.test(msg)) {
+          throw new Error(
+            'O navegador bloqueou o registro de Push (push service error). Verifique: 1) Não estar em Aba Anônima; 2) Se usar Brave, ative "Usar serviços do Google para mensagens push" nas configurações; 3) Desative VPN/AdGuard que bloqueie fcm.googleapis.com e teste no Chrome/Edge normal.'
+          );
+        }
+        throw subErr;
+      }
     }
 
     this.savePushConfig({ workerUrl: baseUrl });
     const syncInfo = await this.syncRemindersToWorker(sub);
 
-    // Enviar push de teste real
-    await fetch(`${baseUrl}/test`, {
+    // Enviar push de teste real e verificar status do serviço FCM/APNs
+    const testRes = await fetch(`${baseUrl}/test`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ subscription: sub.toJSON ? sub.toJSON() : sub })
     });
+    const testData = await testRes.json().catch(() => ({}));
+    if (!testRes.ok || testData.ok === false) {
+      throw new Error(`Push rejeitado pelo servidor de destino (HTTP ${testData.status || testRes.status}).`);
+    }
 
     return syncInfo;
   },
@@ -601,6 +615,21 @@ const PWA = {
     `;
     document.body.appendChild(modal);
     setTimeout(() => modal.classList.add('active'), 30);
+
+    if (cfg.workerUrl) {
+      const fb = document.getElementById('pwa-push-feedback');
+      const base = cfg.workerUrl.trim().replace(/\/+$/, '');
+      fetch(`${base}/status?deviceId=${encodeURIComponent(cfg.deviceId)}`)
+        .then(r => r.json())
+        .then(st => {
+          if (!fb || !st.ok) return;
+          const cronTxt = st.lastCron?.at ? new Date(st.lastCron.at).toLocaleTimeString('pt-BR') : 'aguardando';
+          const rems = st.device?.reminders || [];
+          const listTxt = rems.map(r => `${r.time} (${r.kind === 'habit' ? 'Hábito' : r.date})`).join(', ');
+          fb.innerHTML = `Worker ativo · Último Cron: <strong>${cronTxt}</strong><br>No servidor: <strong>${rems.length}</strong> lembrete(s)${listTxt ? ` — ${listTxt}` : ''}`;
+        })
+        .catch(() => {});
+    }
   },
 
   closePushSettings() {
