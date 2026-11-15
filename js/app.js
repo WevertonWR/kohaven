@@ -16,6 +16,7 @@ const App = {
     quotes:       { module: 'Quotes',       icon: 'quote',     label: 'Frases' },
     media:        { module: 'Media',        icon: 'video',     label: 'Mídias' },
     notes:        { module: 'Notes',        icon: 'book',      label: 'Anotações' },
+    haven:        { module: 'Haven',        icon: 'haven',     label: 'Haven AI' },
   },
 
   init() {
@@ -250,7 +251,7 @@ const App = {
     if (!sidebarNav) return;
 
     const mainRoutes = ['dashboard', 'achievements', 'timer', 'habits'];
-    const moduleRoutes = ['finances', 'goals', 'evolution', 'media', 'quotes', 'notes'];
+    const moduleRoutes = ['finances', 'goals', 'evolution', 'media', 'quotes', 'notes', 'haven'];
 
     sidebarNav.innerHTML = `
       ${mainRoutes.map(key => {
@@ -280,7 +281,7 @@ const App = {
     const container = document.getElementById('mobile-categories-list');
     if (!container) return;
 
-    const allKeys = ['dashboard', 'achievements', 'timer', 'habits', 'finances', 'goals', 'evolution', 'media', 'quotes', 'notes'];
+    const allKeys = ['dashboard', 'achievements', 'timer', 'habits', 'finances', 'goals', 'evolution', 'media', 'quotes', 'notes', 'haven'];
 
     container.innerHTML = allKeys.map(key => {
       const route = this.routes[key];
@@ -318,7 +319,8 @@ const App = {
       evolution: 'Gráficos & Progresso',
       quotes: 'Frases Inspiradoras',
       media: 'Livros, Filmes & Cursos',
-      notes: 'Bloco de Notas & Ideias'
+      notes: 'Bloco de Notas & Ideias',
+      haven: 'Assistente Inteligente'
     };
     return subtitles[key] || 'Módulo Korhaven';
   },
@@ -374,8 +376,22 @@ const App = {
   },
 
   navigate(page, updateHash = true) {
-    if (!this.routes[page]) page = 'dashboard';
-    this.currentPage = page;
+    let cleanPage = page;
+    let queryParams = {};
+
+    if (typeof page === 'string' && page.includes('?')) {
+      const parts = page.split('?');
+      cleanPage = parts[0];
+      try {
+        const sp = new URLSearchParams(parts[1]);
+        for (const [k, v] of sp.entries()) {
+          queryParams[k] = v;
+        }
+      } catch (e) {}
+    }
+
+    if (!this.routes[cleanPage]) cleanPage = 'dashboard';
+    this.currentPage = cleanPage;
 
     if (updateHash) {
       window.location.hash = page;
@@ -385,7 +401,7 @@ const App = {
     document.querySelectorAll('.sidebar-nav-item').forEach(item => {
       item.classList.remove('active');
     });
-    const activeItem = document.getElementById(`nav-${page}`);
+    const activeItem = document.getElementById(`nav-${cleanPage}`);
     if (activeItem) activeItem.classList.add('active');
 
     // Update active state in mobile menu
@@ -396,6 +412,15 @@ const App = {
 
     // Render page
     this.renderCurrentPage();
+
+    // If queryParams has noteId and we are on notes, open fichario
+    if (cleanPage === 'notes' && queryParams.noteId) {
+      setTimeout(() => {
+        if (typeof Notes !== 'undefined' && Notes.openFichario) {
+          Notes.openFichario(queryParams.noteId);
+        }
+      }, 180);
+    }
 
     // Scroll to top on page switch
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -420,6 +445,7 @@ const App = {
       case 'Quotes': module = typeof Quotes !== 'undefined' ? Quotes : null; break;
       case 'Media': module = typeof Media !== 'undefined' ? Media : null; break;
       case 'Notes': module = typeof Notes !== 'undefined' ? Notes : null; break;
+      case 'Haven': module = typeof Haven !== 'undefined' ? Haven : null; break;
     }
 
     if (!module) {
@@ -451,6 +477,7 @@ const App = {
     const authScreen = document.getElementById('auth-screen');
     const loginForm = document.getElementById('auth-login-form');
     const registerForm = document.getElementById('auth-register-form');
+    const quickLogin = document.getElementById('auth-quick-login');
     const subtitle = document.getElementById('auth-subtitle');
     
     if (!authScreen) return;
@@ -458,16 +485,69 @@ const App = {
     authScreen.classList.remove('hidden');
     
     if (Store.auth.isSetup()) {
-      // Show Login
-      loginForm.style.display = 'block';
-      registerForm.style.display = 'none';
-      subtitle.textContent = `Olá de volta, ${Store.settings.get().userName || 'Usuário'}!`;
+      // User has account saved on device: Show 1-Tap Quick Login!
+      this.showQuickLoginForm();
     } else {
-      // Show Register
-      loginForm.style.display = 'none';
-      registerForm.style.display = 'block';
-      subtitle.textContent = 'Crie sua conta local para começar';
+      // Show Register Form
+      if (loginForm) loginForm.style.display = 'none';
+      if (quickLogin) quickLogin.style.display = 'none';
+      if (registerForm) registerForm.style.display = 'block';
+      if (subtitle) subtitle.textContent = 'Crie sua conta local para começar';
     }
+  },
+
+  showQuickLoginForm() {
+    const loginForm = document.getElementById('auth-login-form');
+    const registerForm = document.getElementById('auth-register-form');
+    const quickLogin = document.getElementById('auth-quick-login');
+    const subtitle = document.getElementById('auth-subtitle');
+    const settings = Store.settings.get();
+    const name = settings.userName || 'Usuário';
+    const avatar = settings.avatarImage;
+
+    if (loginForm) loginForm.style.display = 'none';
+    if (registerForm) registerForm.style.display = 'none';
+    if (quickLogin) quickLogin.style.display = 'block';
+
+    const nameEl = document.getElementById('auth-quick-name');
+    const btnLabel = document.getElementById('auth-quick-btn-label');
+    const initialEl = document.getElementById('auth-quick-initial');
+    const avatarEl = document.getElementById('auth-quick-avatar');
+
+    if (nameEl) nameEl.textContent = name;
+    if (btnLabel) btnLabel.textContent = `Entrar como ${name}`;
+    if (initialEl) initialEl.textContent = name.charAt(0).toUpperCase();
+
+    if (avatarEl) {
+      if (avatar) {
+        avatarEl.src = avatar;
+        avatarEl.style.display = 'block';
+        if (initialEl) initialEl.style.display = 'none';
+      } else {
+        avatarEl.style.display = 'none';
+        if (initialEl) initialEl.style.display = 'block';
+      }
+    }
+
+    if (subtitle) subtitle.textContent = `Que bom ter você de volta!`;
+  },
+
+  showFullLoginForm() {
+    const loginForm = document.getElementById('auth-login-form');
+    const registerForm = document.getElementById('auth-register-form');
+    const quickLogin = document.getElementById('auth-quick-login');
+    const backBtn = document.getElementById('auth-back-to-quick');
+    const subtitle = document.getElementById('auth-subtitle');
+
+    if (quickLogin) quickLogin.style.display = 'none';
+    if (registerForm) registerForm.style.display = 'none';
+    if (loginForm) loginForm.style.display = 'block';
+    if (backBtn) backBtn.style.display = 'flex';
+    if (subtitle) subtitle.textContent = 'Acesse com seu email e senha';
+  },
+
+  handleQuickLogin() {
+    this.unlockApp();
   },
   
   handleRegister() {

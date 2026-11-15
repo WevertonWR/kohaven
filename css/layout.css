@@ -57,9 +57,18 @@ html, body {
   padding: env(safe-area-inset-top, 0px) max(var(--space-4), env(safe-area-inset-right, 0px)) 0 max(var(--space-4), env(safe-area-inset-left, 0px));
   transition: all var(--duration-slow) var(--ease-out);
 }
+[data-theme="light"] .logo-wrapper {
+  background: #0B1120 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+}
 [data-theme="light"] .logo-img {
-  filter: invert(1); /* Torna o K preto/escuro */
-  mix-blend-mode: normal; /* Desativa o efeito que escondia o logo sem o fundo branco */
+  filter: none !important;
+  mix-blend-mode: screen !important;
 }
 [data-theme="light"] .sidebar {
   background: rgba(255, 255, 255, 0.45);

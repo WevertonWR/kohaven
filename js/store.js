@@ -450,6 +450,18 @@ const Store = {
       Store._set('goals', this.getAll().filter(g => g.id !== id));
     },
 
+    adjustProgress(goalId, delta) {
+      const all = this.getAll();
+      const goal = all.find(g => g.id === goalId);
+      if (!goal) return null;
+      const target = Math.max(1, parseFloat(goal.targetValue) || 1);
+      const current = Math.max(0, (parseFloat(goal.currentValue) || 0) + delta);
+      goal.currentValue = current;
+      goal.progress = Math.min(100, Math.round((current / target) * 100));
+      Store._set('goals', all);
+      return goal;
+    },
+
     toggleMilestone(goalId, milestoneIdx) {
       const all = this.getAll();
       const goal = all.find(g => g.id === goalId);
@@ -621,6 +633,38 @@ const Store = {
       return Store._get('notes') || [];
     },
 
+    get(id) {
+      return this.getAll().find(n => n.id === id);
+    },
+
+    checkExpirations() {
+      const all = this.getAll();
+      let changed = false;
+      const now = new Date();
+
+      all.forEach(n => {
+        // Daily notes with deadline that hasn't expired yet
+        if (n.type === 'diaria' && !n.expired && n.deadlineDate) {
+          const timePart = n.deadlineTime || '23:59';
+          const deadlineObj = new Date(`${n.deadlineDate}T${timePart}:00`);
+          if (!isNaN(deadlineObj.getTime()) && now > deadlineObj) {
+            n.expired = true;
+            n.expiredAt = now.toISOString();
+            if (n.category && n.category !== 'Expiradas') {
+              n.previousCategory = n.category;
+            }
+            n.category = 'Expiradas';
+            changed = true;
+          }
+        }
+      });
+
+      if (changed) {
+        Store._set('notes', all);
+      }
+      return changed;
+    },
+
     save(note) {
       const all = this.getAll();
       if (note.id) {
@@ -639,6 +683,19 @@ const Store = {
     delete(id) {
       Store._set('notes', this.getAll().filter(n => n.id !== id));
     },
+
+    reactivate(id, newDeadlineDate, newDeadlineTime) {
+      const all = this.getAll();
+      const n = all.find(item => item.id === id);
+      if (!n) return null;
+      n.expired = false;
+      if (newDeadlineDate) n.deadlineDate = newDeadlineDate;
+      if (newDeadlineTime) n.deadlineTime = newDeadlineTime;
+      n.category = n.previousCategory || 'Geral';
+      n.updatedAt = new Date().toISOString();
+      Store._set('notes', all);
+      return n;
+    },
     
     getCategories() {
       return Store._get('notes_categories') || ['Ofertas FB Ads', 'Geral', 'Ideias', 'Referências'];
@@ -646,6 +703,99 @@ const Store = {
     
     saveCategories(categories) {
       Store._set('notes_categories', categories);
+    }
+  },
+
+  // ============================================
+  // HAVEN (Assistente Inteligente)
+  // ============================================
+  haven: {
+    getMemories() {
+      return Store._get('haven_memories') || [];
+    },
+
+    addMemory(memory) {
+      const all = this.getMemories();
+      memory.id = Store._generateId();
+      memory.createdAt = new Date().toISOString();
+      all.push(memory);
+      Store._set('haven_memories', all);
+      return memory;
+    },
+
+    deleteMemory(id) {
+      const all = this.getMemories().filter(m => m.id !== id);
+      Store._set('haven_memories', all);
+    },
+
+    clearMemories() {
+      Store._set('haven_memories', []);
+    },
+
+    searchMemories(query) {
+      const q = query.toLowerCase();
+      return this.getMemories().filter(m => 
+        (m.content && m.content.toLowerCase().includes(q)) ||
+        (m.category && m.category.toLowerCase().includes(q))
+      );
+    },
+
+    getChatHistory() {
+      return Store._get('haven_chat') || [];
+    },
+
+    saveChatHistory(history) {
+      // Guardar apenas as últimas 100 mensagens para não sobrecarregar
+      const trimmed = history.slice(-100);
+      Store._set('haven_chat', trimmed);
+    },
+
+    clearChatHistory() {
+      Store._set('haven_chat', []);
+    },
+
+    // ---- Configuração da IA (a chave NUNCA vai para o backup) ----
+    getAIConfig() {
+      return {
+        apiKey: '',
+        model: '',
+        enabled: false,
+        dailyLimit: 50,
+        ...(Store._get('haven_ai_config') || {})
+      };
+    },
+
+    saveAIConfig(cfg) {
+      Store._set('haven_ai_config', { ...this.getAIConfig(), ...cfg });
+    },
+
+    getAIUsage() {
+      const today = Utils.today();
+      const u = Store._get('haven_ai_usage');
+      return (u && u.date === today) ? u : { date: today, count: 0 };
+    },
+
+    incrementAIUsage() {
+      const u = this.getAIUsage();
+      u.count++;
+      Store._set('haven_ai_usage', u);
+      return u.count;
+    },
+
+    getVoiceConfig() {
+      return {
+        provider: 'auto',
+        geminiVoice: 'Kore',
+        voiceName: '',
+        rate: 1.05,
+        pitch: 1.02,
+        autoSpeak: true,
+        ...(Store._get('haven_voice_config') || {})
+      };
+    },
+
+    saveVoiceConfig(cfg) {
+      Store._set('haven_voice_config', { ...this.getVoiceConfig(), ...cfg });
     }
   },
 
@@ -676,7 +826,8 @@ const Store = {
       'auth_email', 'auth_pass', 'achievements', 'timer_sessions', 'timer_categories',
       'quotes', 'pinned_quote', 'habits', 'transactions',
       'saving_goals', 'debts', 'finance_categories', 'goals',
-      'journal', 'settings', 'media', 'notes', 'notes_categories'
+      'journal', 'settings', 'media', 'notes', 'notes_categories',
+      'haven_memories', 'haven_chat'
     ];
     const data = {};
     keys.forEach(key => {

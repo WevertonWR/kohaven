@@ -1,5 +1,5 @@
 // KORHAVEN — Service Worker
-const CACHE_NAME = 'korhaven-v1.0';
+const CACHE_NAME = 'korhaven-v2.1';
 
 const PRECACHE_ASSETS = [
   './',
@@ -10,7 +10,9 @@ const PRECACHE_ASSETS = [
   './css/components.css',
   './css/modules.css',
   './js/utils.js',
+  './js/picker.js',
   './js/store.js',
+  './js/pwa.js',
   './js/app.js',
   './js/dashboard.js',
   './js/habits.js',
@@ -18,6 +20,7 @@ const PRECACHE_ASSETS = [
   './js/finances.js',
   './js/timer.js',
   './js/notes.js',
+  './js/haven.js',
   './js/media.js',
   './js/quotes.js',
   './js/evolution.js',
@@ -133,13 +136,23 @@ self.addEventListener('push', (event) => {
 // Notification click
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || './';
+  const noteId = event.notification.data && event.notification.data.noteId;
+  const targetUrl = noteId ? `./#notes?noteId=${encodeURIComponent(noteId)}` : ((event.notification.data && event.notification.data.url) || './');
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if (client.url.includes('index.html') && 'focus' in client) {
-          return client.focus();
+          client.focus();
+          client.postMessage({
+            type: 'OPEN_FICHARIO',
+            noteId: noteId,
+            url: targetUrl
+          });
+          if ('navigate' in client && targetUrl) {
+            return client.navigate(targetUrl);
+          }
+          return;
         }
       }
       if (clients.openWindow) {

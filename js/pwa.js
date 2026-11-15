@@ -27,6 +27,18 @@ const PWA = {
       this.showInstallUI();
     });
 
+    // 3. Listen for Service Worker Messages (e.g. notification click redirection to Fichário)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data && (event.data.type === 'OPEN_FICHARIO' || event.data.noteId)) {
+          const noteId = event.data.noteId;
+          if (noteId && typeof App !== 'undefined') {
+            App.navigate(`notes?noteId=${encodeURIComponent(noteId)}`);
+          }
+        }
+      });
+    }
+
     window.addEventListener('appinstalled', () => {
       console.log('[PWA] Korhaven foi instalado com sucesso!');
       this.deferredPrompt = null;
@@ -135,7 +147,7 @@ const PWA = {
     }
   },
 
-  async sendNotification(title, body, url = './') {
+  async sendNotification(title, body, url = './', noteId = null) {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
     const options = {
@@ -143,7 +155,7 @@ const PWA = {
       icon: 'assets/icon-192.png',
       badge: 'assets/icon-192.png',
       vibrate: [200, 100, 200],
-      data: { url: url }
+      data: { url: url, noteId: noteId }
     };
 
     if ('serviceWorker' in navigator) {
@@ -161,12 +173,121 @@ const PWA = {
     } catch (e) {
       console.warn('[PWA] Erro ao criar notificação:', e);
     }
+  },
+
+  // Active Reminder Engine for Habits & Notes
+  _triggeredReminders: {},
+
+  startReminderEngine() {
+    // Check reminders immediately and every 25 seconds
+    this.checkReminders();
+    setInterval(() => this.checkReminders(), 25000);
+  },
+
+  checkReminders() {
+    if (typeof Store === 'undefined') return;
+
+    // Check & move expired daily notes automatically
+    if (Store.notes && typeof Store.notes.checkExpirations === 'function') {
+      const expiredChanged = Store.notes.checkExpirations();
+      if (expiredChanged && typeof App !== 'undefined' && App.currentPage === 'notes') {
+        App.renderCurrentPage();
+      }
+    }
+
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+    const currentDay = String(now.getDate()).padStart(2, '0');
+    const todayStr = `${currentYear}-${currentMonth}-${currentDay}`;
+
+    const currentHours = String(now.getHours()).padStart(2, '0');
+    const currentMinutes = String(now.getMinutes()).padStart(2, '0');
+    const currentTimeStr = `${currentHours}:${currentMinutes}`;
+    const dayOfWeek = now.getDay(); // 0-6
+
+    // 1. Check Habits Reminders
+    try {
+      const habits = Store.habits ? Store.habits.getAll() : [];
+      habits.forEach(h => {
+        if (!h.reminder || !h.reminder.enabled) return;
+        const targetTime = h.reminder.time;
+        const targetDays = Array.isArray(h.reminder.days) ? h.reminder.days : [0,1,2,3,4,5,6];
+
+        if (targetDays.includes(dayOfWeek) && targetTime === currentTimeStr) {
+          const triggerKey = `habit_${h.id}_${todayStr}_${currentTimeStr}`;
+          if (!this._triggeredReminders[triggerKey]) {
+            this._triggeredReminders[triggerKey] = true;
+            this.sendNotification(
+              `⚡ Lembrete: ${h.name}`,
+              `Hora de cumprir seu hábito de hoje! Mantenha o streak ativo.`,
+              '#habits'
+            );
+          }
+        }
+      });
+    } catch (err) {
+      console.warn('[PWA] Erro ao verificar lembretes de hábitos:', err);
+    }
+
+    // 2. Check Notes Reminders (Fixa, Diária, Prolongada)
+    try {
+      const notes = Store.notes ? Store.notes.getAll() : [];
+      notes.forEach(n => {
+        if (n.expired || n.category === 'Expiradas') return;
+        const reminder = n.reminder || {};
+        if (!reminder.enabled) return;
+        const targetDate = reminder.date;
+        const targetTime = reminder.time;
+
+        if (targetDate === todayStr && targetTime === currentTimeStr) {
+          const triggerKey = `note_${n.id}_${todayStr}_${currentTimeStr}`;
+          if (!this._triggeredReminders[triggerKey]) {
+            this._triggeredReminders[triggerKey] = true;
+            
+            let title = `📌 Alerta: ${n.title}`;
+            let message = reminder.message || `Lembrete agendado: ${n.title}`;
+
+            if (n.type === 'diaria') {
+              const impPrefix = n.importance === 'super' 
+                ? '🚨 [SUPER IMPORTANTE] ' 
+                : n.importance === 'importante' 
+                  ? '⚠️ [IMPORTANTE] ' 
+                  : '📅 ';
+              title = `${impPrefix}${n.title}`;
+              message = n.notifyMessage || reminder.message || `Lembrete diário: ${n.title}`;
+            } else if (n.type === 'fixa') {
+              title = `📌 Fixa: ${n.title}`;
+              message = reminder.message || `Lembrete da anotação fixa: ${n.title}`;
+            } else {
+              title = `📈 Oferta: ${n.title}`;
+              message = reminder.message || `Lembrete da oferta: ${n.title}`;
+            }
+
+            this.sendNotification(
+              title,
+              message,
+              `./#notes?noteId=${encodeURIComponent(n.id)}`,
+              n.id
+            );
+          }
+        }
+      });
+    } catch (err) {
+      console.warn('[PWA] Erro ao verificar lembretes de anotações:', err);
+    }
   }
 };
 
 // Auto-initialize PWA
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => PWA.init());
+  document.addEventListener('DOMContentLoaded', () => {
+    PWA.init();
+    PWA.startReminderEngine();
+  });
 } else {
   PWA.init();
+  PWA.startReminderEngine();
 }

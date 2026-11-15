@@ -188,8 +188,9 @@ body {
   filter: none;
 }
 
-[data-theme="light"] .logo-gradient {
-  background: transparent;
+/* Light mode: multiply makes black bg transparent on white, keeping the blue K */
+[data-theme="light"] .logo-img {
+  mix-blend-mode: multiply;
 }
 
 

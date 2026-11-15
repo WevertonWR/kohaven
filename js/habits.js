@@ -173,6 +173,40 @@ const Habits = {
                 <label class="tag" style="cursor:pointer;"><input type="checkbox" value="6" class="day-cb" style="display:none;" onchange="Habits.toggleDay(this)"> Sáb</label>
               </div>
             </div>
+
+            <!-- Notification Reminder Section -->
+            <div class="form-group" style="margin-top: var(--space-4); border-top: 1px solid var(--border); padding-top: var(--space-4);">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-2);">
+                <label class="form-label" style="margin-bottom: 0; display: flex; align-items: center; gap: var(--space-2); cursor: pointer;" onclick="document.getElementById('habit-notify-toggle').click()">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                  </svg>
+                  Lembrete / Notificação no Celular
+                </label>
+                <input type="checkbox" id="habit-notify-toggle" onchange="Habits.toggleNotifyFields(this.checked)" style="width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer;">
+              </div>
+              <div class="form-hint">Receba um alerta na barra de notificações nos horários e dias que você definir.</div>
+
+              <div id="habit-notify-fields" style="display: none; margin-top: var(--space-3); background: rgba(255,255,255,0.03); padding: var(--space-3); border-radius: var(--radius-md); border: 1px solid var(--border);">
+                <div class="form-group" style="margin-bottom: var(--space-3);">
+                  <label class="form-label">Horário do Lembrete</label>
+                  <input type="time" class="form-input" id="habit-notify-time" value="08:00">
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <label class="form-label">Quais dias alertar?</label>
+                  <div style="display: flex; gap: var(--space-2); flex-wrap: wrap;">
+                    <label class="tag" style="cursor:pointer;"><input type="checkbox" value="0" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Dom</label>
+                    <label class="tag" style="cursor:pointer;"><input type="checkbox" value="1" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Seg</label>
+                    <label class="tag" style="cursor:pointer;"><input type="checkbox" value="2" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Ter</label>
+                    <label class="tag" style="cursor:pointer;"><input type="checkbox" value="3" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Qua</label>
+                    <label class="tag" style="cursor:pointer;"><input type="checkbox" value="4" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Qui</label>
+                    <label class="tag" style="cursor:pointer;"><input type="checkbox" value="5" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Sex</label>
+                    <label class="tag" style="cursor:pointer;"><input type="checkbox" value="6" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Sáb</label>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="modal-footer">
             <button class="btn btn-secondary" onclick="Habits.closeModal()">Cancelar</button>
@@ -392,8 +426,14 @@ const Habits = {
             <div class="card card-degrade-escuro" style="display:flex; flex-direction:column;">
               <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:var(--space-4);">
                 <div>
-                  <h3 style="font-size:var(--font-lg); color:var(--text-primary); font-weight:var(--fw-bold); margin-bottom:4px; display:flex; align-items:center; gap:8px;">
+                  <h3 style="font-size:var(--font-lg); color:var(--text-primary); font-weight:var(--fw-bold); margin-bottom:4px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                     <span style="width: 20px; height: 20px; display: inline-flex; color: var(--accent);">${catIcons[cat] || Utils.icons.habits}</span> ${h.name}
+                    ${h.reminder && h.reminder.enabled ? `
+                      <span style="display:inline-flex; align-items:center; gap:4px; font-size:11px; background:var(--accent-soft); color:var(--accent); padding:2px 8px; border-radius:12px; border:1px solid var(--accent); font-weight:600;" title="Lembrete ativo às ${h.reminder.time}">
+                        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                        ${h.reminder.time}
+                      </span>
+                    ` : ''}
                   </h3>
                   <div style="display: flex; align-items: center; gap: 4px; margin-top: 4px;">
                     <span style="width: 14px; height: 14px; display: inline-flex; color: var(--accent);">${Utils.icons.flame}</span>
@@ -485,6 +525,23 @@ const Habits = {
           cb.parentElement.classList.toggle('tag-accent', cb.checked);
         });
       }
+
+      // Populate reminder options
+      const reminder = h.reminder || {};
+      const notifyToggle = document.getElementById('habit-notify-toggle');
+      const notifyTime = document.getElementById('habit-notify-time');
+      if (notifyToggle) {
+        notifyToggle.checked = !!reminder.enabled;
+        this.toggleNotifyFields(notifyToggle.checked);
+      }
+      if (notifyTime) {
+        notifyTime.value = reminder.time || '08:00';
+      }
+      const reminderDays = Array.isArray(reminder.days) ? reminder.days : [0, 1, 2, 3, 4, 5, 6];
+      document.querySelectorAll('.notify-day-cb').forEach(cb => {
+        cb.checked = reminderDays.includes(parseInt(cb.value));
+        cb.parentElement.classList.toggle('tag-accent', cb.checked);
+      });
     } else {
       document.getElementById('habit-modal-title').textContent = 'Novo Hábito';
       document.getElementById('habit-edit-id').value = '';
@@ -499,6 +556,19 @@ const Habits = {
       document.querySelectorAll('.day-cb').forEach(cb => {
         cb.checked = false;
         cb.parentElement.classList.remove('tag-accent');
+      });
+
+      // Reset reminder options
+      const notifyToggle = document.getElementById('habit-notify-toggle');
+      if (notifyToggle) {
+        notifyToggle.checked = false;
+        this.toggleNotifyFields(false);
+      }
+      const notifyTime = document.getElementById('habit-notify-time');
+      if (notifyTime) notifyTime.value = '08:00';
+      document.querySelectorAll('.notify-day-cb').forEach(cb => {
+        cb.checked = true;
+        cb.parentElement.classList.add('tag-accent');
       });
     }
     this.toggleFrequencyOptions();
@@ -547,6 +617,15 @@ const Habits = {
     cb.parentElement.classList.toggle('tag-accent', cb.checked);
   },
 
+  toggleNotifyFields(checked) {
+    const fields = document.getElementById('habit-notify-fields');
+    if (fields) fields.style.display = checked ? 'block' : 'none';
+  },
+
+  toggleNotifyDay(cb) {
+    cb.parentElement.classList.toggle('tag-accent', cb.checked);
+  },
+
   saveFromModal() {
     const name = document.getElementById('habit-name').value.trim();
     if (!name) { Utils.toast('Digite o nome do hábito', 'warning'); return; }
@@ -585,6 +664,24 @@ const Habits = {
       data.id = editId;
       const existing = Store.habits.getAll().find(h => h.id === editId);
       if (existing) data.checks = existing.checks;
+    }
+
+    // Save reminder config
+    const notifyToggle = document.getElementById('habit-notify-toggle');
+    if (notifyToggle && notifyToggle.checked) {
+      const notifyTime = document.getElementById('habit-notify-time').value || '08:00';
+      const notifyDays = [];
+      document.querySelectorAll('.notify-day-cb:checked').forEach(cb => notifyDays.push(parseInt(cb.value)));
+      data.reminder = {
+        enabled: true,
+        time: notifyTime,
+        days: notifyDays.length > 0 ? notifyDays : [0, 1, 2, 3, 4, 5, 6]
+      };
+      if (window.PWA && 'Notification' in window && Notification.permission !== 'granted') {
+        PWA.requestAndTestNotification();
+      }
+    } else {
+      data.reminder = { enabled: false };
     }
 
     Store.habits.save(data);
