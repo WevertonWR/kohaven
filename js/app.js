@@ -772,6 +772,7 @@ const App = {
         const data = JSON.parse(e.target.result);
         Utils.confirm('Isso substituirá todos os dados atuais. Deseja continuar?', () => {
           Store.importAll(data);
+          if (window.PWA && typeof PWA.syncRemindersToWorker === 'function') PWA.syncRemindersToWorker().catch(() => {});
           Utils.toast('Dados importados com sucesso! 🎉', 'success');
           setTimeout(() => window.location.reload(), 1500);
         });

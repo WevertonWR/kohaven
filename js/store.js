@@ -827,7 +827,7 @@ const Store = {
       'quotes', 'pinned_quote', 'habits', 'transactions',
       'saving_goals', 'debts', 'finance_categories', 'goals',
       'journal', 'settings', 'media', 'notes', 'notes_categories',
-      'haven_memories', 'haven_chat'
+      'haven_memories', 'haven_chat', 'haven_voice_config'
     ];
     const data = {};
     keys.forEach(key => {
