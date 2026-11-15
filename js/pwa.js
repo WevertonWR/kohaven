@@ -261,6 +261,7 @@ const PWA = {
       if (!document.hidden) this.checkReminders();
     });
     window.addEventListener('focus', () => this.checkReminders());
+    this.syncRemindersToWorker().catch(() => {});
   },
 
   _clearScheduledTimers() {
@@ -382,6 +383,262 @@ const PWA = {
       });
     } catch (err) {
       console.warn('[PWA] Erro ao verificar lembretes de anotações:', err);
+    }
+  },
+
+  // ============================================
+  // WEB PUSH EM 2º PLANO (CLOUDFLARE WORKER)
+  // ============================================
+  getPushConfig() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('korhaven_push_config') || '{}');
+      if (!saved.deviceId) {
+        saved.deviceId = 'dev_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        localStorage.setItem('korhaven_push_config', JSON.stringify(saved));
+      }
+      return {
+        workerUrl: saved.workerUrl || '',
+        deviceId: saved.deviceId,
+        lastSync: saved.lastSync || 0
+      };
+    } catch (e) {
+      return { workerUrl: '', deviceId: 'dev_default', lastSync: 0 };
+    }
+  },
+
+  savePushConfig(patch) {
+    const cur = this.getPushConfig();
+    const next = { ...cur, ...patch };
+    try {
+      localStorage.setItem('korhaven_push_config', JSON.stringify(next));
+    } catch (e) {}
+    return next;
+  },
+
+  _urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+      outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+  },
+
+  _collectRemindersPayload() {
+    const reminders = [];
+    if (typeof Store === 'undefined') return reminders;
+
+    const habits = Store.habits ? Store.habits.getAll() : [];
+    habits.forEach(h => {
+      if (!h.reminder || !h.reminder.enabled) return;
+      const time = this._normalizeTime(h.reminder.time);
+      if (!time) return;
+      reminders.push({
+        kind: 'habit',
+        id: h.id,
+        title: `⚡ Lembrete: ${h.name}`,
+        body: 'Hora de cumprir seu hábito de hoje! Mantenha o streak ativo.',
+        time,
+        days: Array.isArray(h.reminder.days) ? h.reminder.days : [0, 1, 2, 3, 4, 5, 6]
+      });
+    });
+
+    const notes = Store.notes ? Store.notes.getAll() : [];
+    const todayStr = this._getLocalTodayStr();
+    notes.forEach(n => {
+      if (n.expired || n.category === 'Expiradas') return;
+      const rem = n.reminder || {};
+      if (!rem.enabled) return;
+      const date = rem.date || n.date || todayStr;
+      const time = this._normalizeTime(rem.time);
+      if (!date || !time) return;
+
+      let title = `📌 Alerta: ${n.title}`;
+      let body = rem.message || `Lembrete agendado: ${n.title}`;
+      if (n.type === 'diaria') {
+        const impPrefix = n.importance === 'super'
+          ? '🚨 [SUPER IMPORTANTE] '
+          : n.importance === 'importante'
+            ? '⚠️ [IMPORTANTE] '
+            : '📅 ';
+        title = `${impPrefix}${n.title}`;
+        body = n.notifyMessage || rem.message || `Lembrete diário: ${n.title}`;
+      } else if (n.type === 'fixa') {
+        title = `📌 Fixa: ${n.title}`;
+        body = rem.message || `Lembrete da anotação fixa: ${n.title}`;
+      } else {
+        title = `📈 Oferta: ${n.title}`;
+        body = rem.message || `Lembrete da oferta: ${n.title}`;
+      }
+
+      reminders.push({
+        kind: 'note',
+        id: n.id,
+        title,
+        body,
+        date,
+        time
+      });
+    });
+
+    return reminders;
+  },
+
+  async syncRemindersToWorker(subscriptionOverride = null) {
+    const cfg = this.getPushConfig();
+    const baseUrl = (cfg.workerUrl || '').trim().replace(/\/+$/, '');
+    if (!baseUrl) return { synced: false, reason: 'no_url' };
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      return { synced: false, reason: 'no_push_support' };
+    }
+
+    const reg = (await navigator.serviceWorker.getRegistration()) || await navigator.serviceWorker.ready;
+    if (!reg || !reg.pushManager) return { synced: false, reason: 'no_sw' };
+
+    const sub = subscriptionOverride || await reg.pushManager.getSubscription();
+    if (!sub) return { synced: false, reason: 'no_subscription' };
+
+    const reminders = this._collectRemindersPayload();
+    const res = await fetch(`${baseUrl}/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceId: cfg.deviceId,
+        subscription: sub.toJSON ? sub.toJSON() : sub,
+        timezoneOffset: -new Date().getTimezoneOffset(),
+        reminders
+      })
+    });
+
+    if (!res.ok) throw new Error(`SYNC_HTTP_${res.status}`);
+    this.savePushConfig({ lastSync: Date.now() });
+    return { synced: true, count: reminders.length };
+  },
+
+  async connectWebPush(workerUrl) {
+    const baseUrl = (workerUrl || '').trim().replace(/\/+$/, '');
+    if (!baseUrl) throw new Error('Informe a URL do seu Cloudflare Worker.');
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      throw new Error('Este navegador não suporta Web Push em segundo plano.');
+    }
+
+    const perm = Notification.permission === 'granted'
+      ? 'granted'
+      : await Notification.requestPermission();
+    this.updateNotificationUI();
+    if (perm !== 'granted') {
+      throw new Error('Permissão de notificação negada.');
+    }
+
+    const keyRes = await fetch(`${baseUrl}/vapid-public-key`);
+    if (!keyRes.ok) throw new Error('Não foi possível obter a chave pública do Worker.');
+    const { publicKey } = await keyRes.json();
+    if (!publicKey) throw new Error('VAPID_PUBLIC_KEY não configurada no Worker.');
+
+    const reg = (await navigator.serviceWorker.getRegistration()) || await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: this._urlBase64ToUint8Array(publicKey)
+      });
+    }
+
+    this.savePushConfig({ workerUrl: baseUrl });
+    const syncInfo = await this.syncRemindersToWorker(sub);
+
+    // Enviar push de teste real
+    await fetch(`${baseUrl}/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription: sub.toJSON ? sub.toJSON() : sub })
+    });
+
+    return syncInfo;
+  },
+
+  openPushSettings() {
+    const existing = document.getElementById('pwa-push-modal');
+    if (existing) existing.remove();
+
+    const cfg = this.getPushConfig();
+    const modal = document.createElement('div');
+    modal.id = 'pwa-push-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+      <div class="modal" style="max-width: 500px;">
+        <div class="modal-header">
+          <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+            <span>⚡</span> Push em 2º Plano (App Fechado)
+          </h3>
+          <button class="modal-close" onclick="PWA.closePushSettings()">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 12px;">
+            Conecte seu Worker gratuito do Cloudflare (pasta <code>push-worker</code>) para receber notificações no celular na hora exata, mesmo com o Korhaven fechado.
+          </p>
+          <div class="form-group">
+            <label class="form-label">URL do Cloudflare Worker</label>
+            <input type="url" class="form-input" id="pwa-worker-url" value="${cfg.workerUrl || ''}" placeholder="https://korhaven-push.seu-usuario.workers.dev">
+          </div>
+          <div id="pwa-push-feedback" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 6px;">
+            ${cfg.lastSync ? `Última sincronização: ${new Date(cfg.lastSync).toLocaleTimeString('pt-BR')}` : 'Ainda não conectado.'}
+          </div>
+        </div>
+        <div class="modal-footer" style="justify-content: flex-end; gap: 8px;">
+          <button type="button" class="btn btn-secondary sm" onclick="PWA.closePushSettings()">Fechar</button>
+          <button type="button" class="btn btn-primary sm" id="pwa-push-connect-btn" onclick="PWA.saveAndConnectPush()">
+            🔔 Conectar & Testar Push
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    setTimeout(() => modal.classList.add('active'), 30);
+  },
+
+  closePushSettings() {
+    const modal = document.getElementById('pwa-push-modal');
+    if (modal) {
+      modal.classList.remove('active');
+      setTimeout(() => modal.remove(), 300);
+    }
+  },
+
+  async saveAndConnectPush() {
+    const urlInput = document.getElementById('pwa-worker-url');
+    const fb = document.getElementById('pwa-push-feedback');
+    const btn = document.getElementById('pwa-push-connect-btn');
+    if (!urlInput) return;
+
+    if (btn) btn.disabled = true;
+    if (fb) fb.textContent = 'Conectando ao Worker e registrando Push...';
+
+    try {
+      const info = await this.connectWebPush(urlInput.value);
+      if (fb) {
+        fb.style.color = 'var(--success)';
+        fb.textContent = `✅ Conectado! ${info.count || 0} lembrete(s) sincronizado(s).`;
+      }
+      if (typeof Utils !== 'undefined') {
+        Utils.toast('Push em 2º plano conectado com sucesso! 🔔', 'success');
+      }
+    } catch (err) {
+      if (fb) {
+        fb.style.color = 'var(--danger)';
+        fb.textContent = `❌ ${err.message}`;
+      }
+      if (typeof Utils !== 'undefined') {
+        Utils.toast(err.message, 'error');
+      }
+    } finally {
+      if (btn) btn.disabled = false;
     }
   }
 };

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gerador de Chaves VAPID — Korhaven Push</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #090d1a; color: #e2e8f0; padding: 24px; max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 1.35rem; color: #a78bfa; }
+    button { background: #6366f1; color: #fff; border: none; padding: 10px 18px; border-radius: 10px; font-weight: 700; cursor: pointer; }
+    pre { background: #111827; border: 1px solid #334155; padding: 14px; border-radius: 10px; overflow-x: auto; user-select: all; }
+  </style>
+</head>
+<body>
+  <h1>🔑 Gerador de Chaves VAPID (Korhaven Push)</h1>
+  <p>Clique no botão abaixo para gerar seu par de chaves P-256 gratuito direto no navegador:</p>
+  <button onclick="gerar()">Gerar Chaves VAPID</button>
+  <h3>Chave Pública (VAPID_PUBLIC_KEY):</h3>
+  <pre id="pub">—</pre>
+  <h3>Chave Privada (VAPID_PRIVATE_KEY — mantenha em segredo no Worker):</h3>
+  <pre id="priv">—</pre>
+  <script>
+    function b64u(bytes) {
+      let bin = '';
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    async function gerar() {
+      const kp = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+      const pubRaw = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
+      const privJwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
+      document.getElementById('pub').textContent = b64u(pubRaw);
+      document.getElementById('priv').textContent = privJwk.d;
+    }
+    gerar();
+  </script>
+</body>
+</html>

@@ -1370,6 +1370,7 @@ ${n.content || 'Nenhuma descrição adicionada.'}
 
     Store.notes.save(data);
     if (window.PWA && typeof PWA.checkReminders === 'function') PWA.checkReminders();
+    if (window.PWA && typeof PWA.syncRemindersToWorker === 'function') PWA.syncRemindersToWorker().catch(() => {});
     this.closeModal();
     Utils.toast(editId ? 'Anotação atualizada com sucesso!' : 'Anotação salva com sucesso!', 'success');
     App.renderCurrentPage();
@@ -1378,6 +1379,7 @@ ${n.content || 'Nenhuma descrição adicionada.'}
   confirmDelete(id) {
     Utils.confirm('Tem certeza que deseja excluir esta anotação permanentemente?', () => {
       Store.notes.delete(id);
+      if (window.PWA && typeof PWA.syncRemindersToWorker === 'function') PWA.syncRemindersToWorker().catch(() => {});
       Utils.toast('Anotação removida com sucesso.', 'danger');
       App.renderCurrentPage();
     });

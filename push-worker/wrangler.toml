@@ -1,0 +1,13 @@
+name = "korhaven-push"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[triggers]
+crons = ["* * * * *"]
+
+[[kv_namespaces]]
+binding = "KORHAVEN_PUSH_KV"
+id = "BMGpfv2NsCiyqIf3aiodh_R920DmtI72C7tX9vOcIbRaXp9TgHvfcWL0mrqYY4U0QNIAiU_ez6MuX98NJIyPA0A"
+
+[vars]
+VAPID_SUBJECT = "mailto:admin@korhaven.app"
