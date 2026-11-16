@@ -1414,16 +1414,16 @@ const Haven = {
   },
 
   startVoice() {
-    // Quando a IA Gemini está ativa, gravar áudio real (funciona no iPhone PWA e Android!)
-    if (HavenAI.isReady() && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder) {
-      this._startAudioRecording();
-      return;
-    }
-
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
+    // Usar reconhecimento nativo primeiro (funciona sem conflito com o áudio no iPhone);
+    // cair para MediaRecorder apenas se SpeechRecognition não existir no navegador
     if (!SpeechRecognition) {
-      Utils.toast('Para gravar áudio neste aparelho, ative a IA do Gemini em ⚙️ Configurar IA.', 'warning');
+      if (HavenAI.isReady() && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder) {
+        this._startAudioRecording();
+        return;
+      }
+      Utils.toast('Reconhecimento de voz não suportado neste navegador.', 'error');
       return;
     }
 
