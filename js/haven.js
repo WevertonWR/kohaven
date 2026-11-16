@@ -437,10 +437,11 @@ const Haven = {
     const isIncome = /(receita|ganhei|recebi|salario|entrada)/.test(lower);
     const type = isIncome ? 'income' : 'expense';
     const desc = text
-      .replace(/\b(salva|salvar|salve|coloca|lanca|lança|registra|adiciona|gastei|paguei|comprei|recebi|ganhei|uma|um|de|no|na|meu|saldo|despesa|receita)\b/gi, ' ')
+      .replace(/\b(ol[aá]|oi|haven|raven|eu|preciso|que|voc[eê]|voce|marque|salva|salvar|salve|coloca|coloque|lanca|lan[cç]a|lance|registra|registre|adiciona|adicione|gastei|paguei|comprei|recebi|ganhei|uma|um|de|no|na|meu|saldo|despesa|receita|por|favor)\b/gi, ' ')
+      .replace(/R\$/gi, ' ')
       .replace(numMatch[0], ' ')
       .replace(/\s+/g, ' ')
-      .trim() || (isIncome ? 'Receita (Haven)' : 'Despesa (Haven)');
+      .trim() || (isIncome ? 'Receita' : 'Despesa');
 
     Store.finances.saveTransaction({
       type,
