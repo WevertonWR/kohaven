@@ -331,9 +331,10 @@ const Haven = {
 
   // Decide se a pergunta deve ir para a IA
   _needsAI(lower, intent) {
-    // Quando a IA está ativa, só atalhos locais exatos ficam no modo local
-    const exactLocal = ['summary', 'finances', 'habits', 'goals', 'pomodoro'];
-    if (exactLocal.includes(intent)) return false;
+    if (this._forceLocalOnce) {
+      this._forceLocalOnce = false;
+      return false;
+    }
     return true;
   },
 
@@ -1379,13 +1380,19 @@ const Haven = {
         const chunks = this._audioChunks.slice();
         const mime = recorder.mimeType || chosenMime || 'audio/mp4';
         this._cleanupAudioStream();
-        if (!chunks.length) return;
+        if (!chunks.length) {
+          Utils.toast('Nenhum áudio captado — tente falar mais perto do microfone.', 'warning');
+          return;
+        }
         const blob = new Blob(chunks, { type: mime });
-        if (blob.size < 400) return;
+        if (blob.size < 400) {
+          Utils.toast('Áudio muito curto — fale por pelo menos 1 segundo.', 'warning');
+          return;
+        }
         this._processAudioBlob(blob, mime);
       };
 
-      recorder.start();
+      recorder.start(250);
       this._isListening = true;
       const orb = document.getElementById('haven-mic-orb');
       if (orb) orb.classList.add('is-listening');
@@ -1493,6 +1500,9 @@ const Haven = {
     }
 
     if (text) {
+      if (['resumo', 'financas', 'habitos', 'metas'].includes(action)) {
+        this._forceLocalOnce = true;
+      }
       this._addUserMessage(text);
       this._processMessage(text);
     }
