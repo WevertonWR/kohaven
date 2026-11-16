@@ -680,11 +680,22 @@ const Haven = {
                       (cfg.provider !== 'browser' && HavenAI.isReady());
 
     if (useGemini) {
+      const cooldownUntil = parseInt(localStorage.getItem('haven_tts_cooldown_until') || '0', 10);
+      if (cooldownUntil > Date.now()) {
+        this._speakWithBrowser(plain, cfg, token);
+        return;
+      }
       this._speakWithGemini(plain, cfg, token).catch((err) => {
         console.warn('[Haven TTS Gemini]', err);
         if (token === this._speechToken) {
-          if (cfg.provider === 'gemini' && typeof Utils !== 'undefined') {
-            Utils.toast(`Voz Gemini falhou (${err?.message || 'erro'}) — usando voz do aparelho.`, 'warning');
+          if (typeof Utils !== 'undefined') {
+            if (err && err.status === 429) {
+              const until = parseInt(localStorage.getItem('haven_tts_cooldown_until') || '0', 10);
+              const mins = Math.max(1, Math.round((until - Date.now()) / 60000));
+              Utils.toast(`Cota grátis da voz neural esgotou. Volta em ~${mins} min — usando voz do iPhone.`, 'warning');
+            } else {
+              Utils.toast('Voz neural indisponível — usando voz do iPhone.', 'warning');
+            }
           }
           this._speakWithBrowser(plain, cfg, token);
         }
@@ -746,7 +757,14 @@ const Haven = {
 
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
-      throw new Error(errBody?.error?.message || `HTTP ${res.status}`);
+      const e = new Error(errBody?.error?.message || `HTTP ${res.status}`);
+      e.status = res.status;
+      if (res.status === 429) {
+        const m = String(e.message).match(/retry in ([\d.]+)s/i);
+        const waitSec = m ? Math.ceil(parseFloat(m[1])) : 3600;
+        localStorage.setItem('haven_tts_cooldown_until', String(Date.now() + waitSec * 1000));
+      }
+      throw e;
     }
     const data = await res.json();
     if (token !== this._speechToken) return;
@@ -1745,7 +1763,7 @@ const Haven = {
     const usage = Store.haven.getAIUsage();
     const models = cfg.availableModels && cfg.availableModels.length > 0
       ? cfg.availableModels
-      : (cfg.model ? [cfg.model] : ['gemini-2.5-flash', 'gemini-2.0-flash']);
+      : (cfg.model ? [cfg.model] : ['gemini-3.8-flash']);
 
     const modal = document.createElement('div');
     modal.id = 'haven-ai-modal';
@@ -2055,7 +2073,7 @@ const Haven = {
   saveAISettings() {
     const enabled = !!document.getElementById('haven-ai-enabled')?.checked;
     const apiKey = (document.getElementById('haven-ai-key')?.value || '').trim();
-    const model = document.getElementById('haven-ai-model')?.value || 'gemini-2.5-flash';
+    const model = document.getElementById('haven-ai-model')?.value || 'gemini-3.8-flash';
     const limitRaw = parseInt(document.getElementById('haven-ai-limit')?.value, 10);
     const dailyLimit = isNaN(limitRaw) || limitRaw < 1 ? 50 : limitRaw;
 
@@ -2201,16 +2219,16 @@ const HavenAI = {
         .map(m => m.name.replace(/^models\//, ''))
         .filter(name => name.includes('gemini') && !/embedding|imagen|veo|tts|audio|robotics/i.test(name));
 
-      // Ordena priorizando os modelos Flash mais recentes
+      // Ordena priorizando os modelos Flash mais recentes (pela versão numérica)
       rawModels.sort((a, b) => {
         const score = (n) => {
           let s = 0;
-          if (/flash/i.test(n)) s += 100;
-          if (/lite/i.test(n)) s -= 5;
-          if (/2\.5/.test(n)) s += 30;
-          else if (/2\.0/.test(n)) s += 20;
-          else if (/1\.5/.test(n)) s += 10;
-          if (/exp|preview/i.test(n)) s -= 3;
+          const v = n.match(/gemini-(\d+(?:\.\d+)?)/i);
+          if (v) s += parseFloat(v[1]) * 100;
+          if (/flash/i.test(n)) s += 50;
+          if (/lite/i.test(n)) s -= 20;
+          if (/exp|preview/i.test(n)) s -= 10;
+          if (/pro/i.test(n)) s -= 5;
           return s;
         };
         return score(b) - score(a);
@@ -2226,9 +2244,36 @@ const HavenAI = {
     }
   },
 
+  // Se o modelo salvo foi descontinuado (404), descobre um novo e salva automaticamente
+  async _callGeminiAutoModel(payload, apiKey, model) {
+    try {
+      return { data: await this._callGemini(payload, apiKey, model), model };
+    } catch (err) {
+      const isGone = err && (err.status === 404 || /no longer available|not found/i.test(err.message || ''));
+      if (!isGone) throw err;
+
+      let newModel = null;
+      const suggested = String(err.message || '').match(/models\/(gemini-[\w.\-]+)/gi) || [];
+      const candidates = suggested.map(s => s.replace(/^models\//i, '')).filter(m => m !== model);
+      if (candidates.length) newModel = candidates[0];
+
+      if (!newModel) {
+        const res = await this.testConnection(apiKey);
+        if (res.ok) {
+          newModel = res.models.find(m => m !== model) || null;
+          Store.haven.saveAIConfig({ availableModels: res.models });
+        }
+      }
+      if (!newModel) throw err;
+
+      Store.haven.saveAIConfig({ model: newModel });
+      return { data: await this._callGemini(payload, apiKey, newModel), model: newModel };
+    }
+  },
+
   async ask(userText, userLower, audioPart = null) {
     const cfg = Store.haven.getAIConfig();
-    const model = cfg.model || 'gemini-2.5-flash';
+    let model = cfg.model || 'gemini-3.8-flash';
     const apiKey = cfg.apiKey.trim();
 
     const userParts = audioPart
@@ -2244,7 +2289,9 @@ const HavenAI = {
     const tools = [{ functionDeclarations: this._toolDeclarations() }];
 
     Store.haven.incrementAIUsage();
-    let data = await this._callGemini({ contents, systemInstruction, tools }, apiKey, model);
+    const first = await this._callGeminiAutoModel({ contents, systemInstruction, tools }, apiKey, model);
+    let data = first.data;
+    model = first.model;
 
     const candidate = data?.candidates?.[0];
     const parts = candidate?.content?.parts || [];
@@ -2652,11 +2699,11 @@ const HavenAI = {
   friendlyError(err) {
     if (!err) return 'Não consegui falar com a IA — respondi no modo local.';
     if (err.name === 'AbortError') return 'A IA demorou demais para responder — usei o modo local.';
-    if (err.status === 400 || err.status === 401 || err.status === 403) return `Erro na API Gemini (${err.status}: ${err.message || 'verifique chave/modelo em ⚙️'}).`;
-    if (err.status === 404) return `Modelo Gemini não encontrado (${err.message || 'atualize o modelo em ⚙️ Configurar IA'}).`;
+    if (err.status === 400 || err.status === 401 || err.status === 403) return 'A chave da API foi recusada — confira em ⚙️ Configurar IA.';
+    if (err.status === 404) return 'Modelo Gemini indisponível — toque em ⚙️ → 🔌 Testar Conexão para atualizar.';
     if (err.status === 429) return 'Limite grátis da IA atingido por agora — voltando ao modo local.';
     if (!navigator.onLine) return 'Sem internet no momento — respondi no modo local.';
-    return `Erro ao consultar a IA (${err.message || 'desconhecido'}) — respondi no modo local.`;
+    return 'Erro ao consultar a IA — respondi no modo local.';
   }
 };
 
