@@ -596,24 +596,88 @@ const Haven = {
   // ============================================
   _speechToken: 0,
   _sharedAudio: null,
+  _audioCtx: null,
+  _audioSource: null,
 
   _unlockAudio() {
     try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        if (!this._audioCtx) this._audioCtx = new AudioCtx();
+        if (this._audioCtx.state === 'suspended') {
+          this._audioCtx.resume().catch(() => {});
+        }
+        // Tocar 1 sample silencioso mantém o AudioContext desbloqueado no iOS durante toda a sessão
+        const buf = this._audioCtx.createBuffer(1, 1, 22050);
+        const src = this._audioCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(this._audioCtx.destination);
+        src.start(0);
+      }
       if (!this._sharedAudio) {
         this._sharedAudio = new Audio();
         this._sharedAudio.setAttribute('playsinline', 'true');
       }
-      // Desbloquear áudio no iOS/Safari dentro do toque do usuário
-      this._sharedAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-      const p = this._sharedAudio.play();
-      if (p && typeof p.then === 'function') {
-        p.then(() => {
-          if (this._sharedAudio && this._sharedAudio.src.startsWith('data:audio/wav')) {
-            this._sharedAudio.pause();
-          }
-        }).catch(() => {});
-      }
     } catch (e) {}
+  },
+
+  async _playAudioBlob(blob, rate, token) {
+    const playbackRate = Math.min(1.4, Math.max(0.8, Number(rate) || 1.0));
+
+    // Preferir Web Audio API (funciona no iOS mesmo após múltiplos await fetch / SpeechRecognition)
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (AudioCtx) {
+      try {
+        if (!this._audioCtx) this._audioCtx = new AudioCtx();
+        if (this._audioCtx.state === 'suspended') await this._audioCtx.resume();
+        const arr = await blob.arrayBuffer();
+        const decoded = await this._audioCtx.decodeAudioData(arr.slice(0));
+        if (token !== this._speechToken) return;
+
+        const src = this._audioCtx.createBufferSource();
+        src.buffer = decoded;
+        src.playbackRate.value = playbackRate;
+        src.connect(this._audioCtx.destination);
+        this._audioSource = src;
+
+        if (typeof HavenOrb !== 'undefined') HavenOrb.setState('speaking');
+        src.onended = () => {
+          if (this._audioSource === src) this._audioSource = null;
+          if (token === this._speechToken && typeof HavenOrb !== 'undefined' && !this._isListening) {
+            HavenOrb.setState('idle');
+          }
+        };
+        src.start(0);
+        return;
+      } catch (ctxErr) {
+        console.warn('[Haven WebAudio fallback]', ctxErr);
+      }
+    }
+
+    // Fallback HTMLAudioElement
+    const audioUrl = URL.createObjectURL(blob);
+    const audio = this._sharedAudio || new Audio();
+    audio.setAttribute('playsinline', 'true');
+    audio.src = audioUrl;
+    audio.playbackRate = playbackRate;
+    this._sharedAudio = audio;
+    this._currentAudio = audio;
+
+    audio.onplay = () => {
+      if (token === this._speechToken && typeof HavenOrb !== 'undefined') {
+        HavenOrb.setState('speaking');
+      }
+    };
+    const cleanup = () => {
+      URL.revokeObjectURL(audioUrl);
+      if (this._currentAudio === audio) this._currentAudio = null;
+      if (token === this._speechToken && typeof HavenOrb !== 'undefined' && !this._isListening) {
+        HavenOrb.setState('idle');
+      }
+    };
+    audio.onended = cleanup;
+    audio.onerror = cleanup;
+    await audio.play();
   },
 
   _scoreVoice(v) {
@@ -816,30 +880,7 @@ const Haven = {
     const blob = await res.blob();
     if (token !== this._speechToken) return;
 
-    const audioUrl = URL.createObjectURL(blob);
-    const audio = this._sharedAudio || new Audio();
-    audio.setAttribute('playsinline', 'true');
-    audio.src = audioUrl;
-    audio.playbackRate = Math.min(1.4, Math.max(0.8, Number(cfg.rate) || 1.0));
-    this._sharedAudio = audio;
-    this._currentAudio = audio;
-
-    audio.onplay = () => {
-      if (token === this._speechToken && typeof HavenOrb !== 'undefined') {
-        HavenOrb.setState('speaking');
-      }
-    };
-    const cleanup = () => {
-      URL.revokeObjectURL(audioUrl);
-      if (this._currentAudio === audio) this._currentAudio = null;
-      if (token === this._speechToken && typeof HavenOrb !== 'undefined' && !this._isListening) {
-        HavenOrb.setState('idle');
-      }
-    };
-    audio.onended = cleanup;
-    audio.onerror = cleanup;
-
-    await audio.play();
+    await this._playAudioBlob(blob, cfg.rate, token);
   },
 
   _pcmToWavBlob(pcmBytes, sampleRate = 24000) {
@@ -925,30 +966,7 @@ const Haven = {
 
     if (token !== this._speechToken) return;
 
-    const audioUrl = URL.createObjectURL(blob);
-    const audio = this._sharedAudio || new Audio();
-    audio.setAttribute('playsinline', 'true');
-    audio.src = audioUrl;
-    audio.playbackRate = Math.min(1.4, Math.max(0.8, Number(cfg.rate) || 1.0));
-    this._sharedAudio = audio;
-    this._currentAudio = audio;
-
-    audio.onplay = () => {
-      if (token === this._speechToken && typeof HavenOrb !== 'undefined') {
-        HavenOrb.setState('speaking');
-      }
-    };
-    const cleanup = () => {
-      URL.revokeObjectURL(audioUrl);
-      if (this._currentAudio === audio) this._currentAudio = null;
-      if (token === this._speechToken && typeof HavenOrb !== 'undefined' && !this._isListening) {
-        HavenOrb.setState('idle');
-      }
-    };
-    audio.onended = cleanup;
-    audio.onerror = cleanup;
-
-    await audio.play();
+    await this._playAudioBlob(blob, cfg.rate, token);
   },
 
   _speakWithBrowser(plain, cfg, token) {
@@ -1016,6 +1034,10 @@ const Haven = {
 
   stopSpeaking() {
     this._speechToken++;
+    if (this._audioSource) {
+      try { this._audioSource.stop(); } catch (e) {}
+      this._audioSource = null;
+    }
     if (this._currentAudio) {
       try {
         this._currentAudio.pause();
@@ -1403,9 +1425,8 @@ const Haven = {
   _audioStream: null,
 
   toggleVoice() {
+    this._unlockAudio();
     if (this._isListening) {
-      // Desbloquear áudio no toque de envio (sem conflitar com a captura do microfone no iOS)
-      this._unlockAudio();
       this.stopVoice();
     } else {
       this.stopSpeaking();
@@ -2515,30 +2536,37 @@ const HavenAI = {
     }
   },
 
-  // Se o modelo salvo foi descontinuado (404), descobre um novo e salva automaticamente
+  // Se o modelo falhar por descontinuação (404) ou sobrecarga (503/429), tenta outro modelo automaticamente
   async _callGeminiAutoModel(payload, apiKey, model) {
     try {
       return { data: await this._callGemini(payload, apiKey, model), model };
     } catch (err) {
       const isGone = err && (err.status === 404 || /no longer available|not found/i.test(err.message || ''));
-      if (!isGone) throw err;
+      const isOverloaded = err && (err.status === 503 || err.status === 429 || err.status === 500);
+      if (!isGone && !isOverloaded) throw err;
 
-      let newModel = null;
-      const suggested = String(err.message || '').match(/models\/(gemini-[\w.\-]+)/gi) || [];
-      const candidates = suggested.map(s => s.replace(/^models\//i, '')).filter(m => m !== model);
-      if (candidates.length) newModel = candidates[0];
+      const cfg = Store.haven.getAIConfig();
+      let fallbacks = Array.isArray(cfg.availableModels) ? cfg.availableModels.filter(m => m !== model) : [];
 
-      if (!newModel) {
+      if (isGone) {
+        const suggested = String(err.message || '').match(/models\/(gemini-[\w.\-]+)/gi) || [];
+        const candidates = suggested.map(s => s.replace(/^models\//i, '')).filter(m => m !== model);
+        if (candidates.length) fallbacks = [...candidates, ...fallbacks];
+      }
+
+      if (fallbacks.length === 0) {
         const res = await this.testConnection(apiKey);
         if (res.ok) {
-          newModel = res.models.find(m => m !== model) || null;
+          fallbacks = res.models.filter(m => m !== model);
           Store.haven.saveAIConfig({ availableModels: res.models });
         }
       }
-      if (!newModel) throw err;
 
-      Store.haven.saveAIConfig({ model: newModel });
-      return { data: await this._callGemini(payload, apiKey, newModel), model: newModel };
+      const nextModel = fallbacks[0];
+      if (!nextModel) throw err;
+
+      if (isGone) Store.haven.saveAIConfig({ model: nextModel });
+      return { data: await this._callGemini(payload, apiKey, nextModel), model: nextModel };
     }
   },
 
