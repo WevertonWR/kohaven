@@ -680,8 +680,12 @@ const Haven = {
                       (cfg.provider !== 'browser' && HavenAI.isReady());
 
     if (useGemini) {
-      this._speakWithGemini(plain, cfg, token).catch(() => {
+      this._speakWithGemini(plain, cfg, token).catch((err) => {
+        console.warn('[Haven TTS Gemini]', err);
         if (token === this._speechToken) {
+          if (cfg.provider === 'gemini' && typeof Utils !== 'undefined') {
+            Utils.toast(`Voz Gemini falhou (${err?.message || 'erro'}) — usando voz do aparelho.`, 'warning');
+          }
           this._speakWithBrowser(plain, cfg, token);
         }
       });
@@ -732,7 +736,7 @@ const Haven = {
           speechConfig: {
             voiceConfig: {
               prebuiltVoiceConfig: {
-                voiceName: cfg.geminiVoice || 'Kore'
+                voiceName: cfg.geminiVoice || 'Charon'
               }
             }
           }
@@ -740,7 +744,10 @@ const Haven = {
       })
     });
 
-    if (!res.ok) throw new Error(`GEMINI_TTS_${res.status}`);
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody?.error?.message || `HTTP ${res.status}`);
+    }
     const data = await res.json();
     if (token !== this._speechToken) return;
 
@@ -1841,12 +1848,13 @@ const Haven = {
     const bestAuto = voices[0];
 
     const geminiVoices = [
-      { id: 'Kore', label: 'Kore — Firme, clara e natural' },
-      { id: 'Aoede', label: 'Aoede — Suave e envolvente' },
-      { id: 'Zephyr', label: 'Zephyr — Leve e conversacional' },
-      { id: 'Puck', label: 'Puck — Descontraída e expressiva' },
-      { id: 'Charon', label: 'Charon — Grave e serena' },
-      { id: 'Fenrir', label: 'Fenrir — Intensa e marcante' }
+      { id: 'Charon', label: '👨 Charon — Masculina grave e serena' },
+      { id: 'Fenrir', label: '👨 Fenrir — Masculina firme e marcante' },
+      { id: 'Orus', label: '👨 Orus — Masculina equilibrada e natural' },
+      { id: 'Puck', label: '👨 Puck — Masculina leve e descontraída' },
+      { id: 'Kore', label: '👩 Kore — Feminina firme e clara' },
+      { id: 'Aoede', label: '👩 Aoede — Feminina suave e envolvente' },
+      { id: 'Zephyr', label: '👩 Zephyr — Feminina leve e conversacional' }
     ];
 
     const voiceLabel = (v) => {
@@ -2228,7 +2236,7 @@ const HavenAI = {
       : [{ text: userText }];
 
     const contents = [
-      ...this._buildHistoryContents(),
+      ...this._buildHistoryContents(true),
       { role: 'user', parts: userParts }
     ];
 
@@ -2309,7 +2317,13 @@ const HavenAI = {
       `Você é o Haven, assistente pessoal inteligente do(a) ${userName} no dashboard Korhaven.`,
       `Responda sempre em português do Brasil, de forma direta, prática e amigável.`,
       `Data e hora atuais: ${Haven._formatMemoryDate(now.toISOString())}.`,
-      `Se o usuário pedir para lembrar, salvar ou anotar algo (ou mencionar uma palavra nova para guardar), use a função salvar_memoria ou criar_anotacao_diaria.`,
+      `Você TEM ferramentas reais para agir dentro do Korhaven:`,
+      `- Se o usuário pedir para registrar gasto, despesa, compra, receita, ganho ou alterar saldo, SEMPRE chame registrar_transacao (NÃO use salvar_memoria para lançamentos financeiros).`,
+      `- Se o usuário pedir para marcar/concluir um hábito de hoje, chame concluir_habito.`,
+      `- Se o usuário pedir para criar um hábito (com ou sem lembrete), chame criar_habito.`,
+      `- Se o usuário pedir para criar uma meta, chame criar_meta.`,
+      `- Se pedir para anotar uma tarefa ou lembrete com data/hora, chame criar_anotacao_diaria.`,
+      `- Se pedir para guardar uma palavra, ideia ou fato pessoal na memória, chame salvar_memoria.`,
       `Se o usuário perguntar sobre algo que disse/ouviu/salvou antes, procure primeiro nas memórias abaixo (atenção às datas!).`
     ];
 
@@ -2369,8 +2383,13 @@ const HavenAI = {
     return lines.join('\n\n');
   },
 
-  _buildHistoryContents() {
-    const history = Store.haven.getChatHistory().slice(-10);
+  _buildHistoryContents(excludeLastUser = false) {
+    let history = Store.haven.getChatHistory().slice(-11);
+    if (excludeLastUser && history.length > 0 && history[history.length - 1].role === 'user') {
+      history = history.slice(0, -1);
+    }
+    history = history.slice(-10);
+
     const contents = [];
     for (const msg of history) {
       let txt = msg.content || '';
@@ -2381,10 +2400,22 @@ const HavenAI = {
         txt = tmp.textContent.replace(/\s+/g, ' ').trim();
       }
       if (!txt) continue;
+
+      const role = msg.role === 'user' ? 'user' : 'model';
+      // Gemini exige alternância user -> model e nunca começar com model
+      if (contents.length === 0 && role !== 'user') continue;
+      if (contents.length > 0 && contents[contents.length - 1].role === role) {
+        contents[contents.length - 1].parts[0].text += '\n' + txt.slice(0, 400);
+        continue;
+      }
       contents.push({
-        role: msg.role === 'user' ? 'user' : 'model',
+        role,
         parts: [{ text: txt.slice(0, 800) }]
       });
+    }
+    // Se terminar com 'user', remover para não colidir com a nova mensagem 'user'
+    if (contents.length > 0 && contents[contents.length - 1].role === 'user') {
+      contents.pop();
     }
     return contents;
   },
@@ -2427,6 +2458,57 @@ const HavenAI = {
             termo: { type: 'STRING', description: 'Palavra ou termo a buscar.' }
           },
           required: ['termo']
+        }
+      },
+      {
+        name: 'registrar_transacao',
+        description: 'Registra uma despesa (gasto) ou receita (entrada) real na aba Finanças do Korhaven, atualizando o saldo.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            tipo: { type: 'STRING', description: 'expense (despesa/gasto) ou income (receita/ganho)' },
+            valor: { type: 'NUMBER', description: 'Valor numérico em reais (ex: 250)' },
+            descricao: { type: 'STRING', description: 'Descrição curta (ex: Mercado, Uber, Salário)' },
+            categoria: { type: 'STRING', description: 'Categoria (ex: Alimentação, Transporte, Lazer, Moradia, Saúde, Trabalho, Outros)' },
+            data: { type: 'STRING', description: 'Data YYYY-MM-DD (opcional, padrão hoje)' }
+          },
+          required: ['tipo', 'valor', 'descricao']
+        }
+      },
+      {
+        name: 'concluir_habito',
+        description: 'Marca um hábito existente como concluído hoje na aba Hábitos.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            nome_habito: { type: 'STRING', description: 'Nome ou parte do nome do hábito a marcar como feito.' }
+          },
+          required: ['nome_habito']
+        }
+      },
+      {
+        name: 'criar_habito',
+        description: 'Cria um novo hábito na aba Hábitos do Korhaven (opcionalmente com horário de lembrete).',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            nome: { type: 'STRING', description: 'Nome do hábito.' },
+            categoria: { type: 'STRING', description: 'saúde, foco, estudo, fitness, financeiro ou pessoal' },
+            horario_lembrete: { type: 'STRING', description: 'Horário HH:MM para notificar (opcional)' }
+          },
+          required: ['nome']
+        }
+      },
+      {
+        name: 'criar_meta',
+        description: 'Cria uma nova meta na aba Metas do Korhaven.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            titulo: { type: 'STRING', description: 'Título da meta.' },
+            progresso: { type: 'NUMBER', description: 'Progresso inicial de 0 a 100 (padrão 0).' }
+          },
+          required: ['titulo']
         }
       }
     ];
@@ -2481,6 +2563,73 @@ const HavenAI = {
       };
     }
 
+    if (name === 'registrar_transacao' && Store.finances) {
+      const tipo = args.tipo === 'income' ? 'income' : 'expense';
+      const valor = Math.abs(parseFloat(args.valor) || 0);
+      if (!valor) return { result: { ok: false, error: 'Valor inválido' }, badgeHtml: '' };
+
+      const tx = Store.finances.saveTransaction({
+        type: tipo,
+        amount: valor,
+        description: String(args.descricao || (tipo === 'income' ? 'Receita (Haven)' : 'Despesa (Haven)')).trim(),
+        category: String(args.categoria || 'Outros').trim(),
+        date: args.data || Utils.today()
+      });
+
+      const sign = tipo === 'income' ? '+' : '-';
+      return {
+        result: { ok: true, id: tx.id, type: tipo, amount: valor, description: tx.description },
+        badgeHtml: `<div class="haven-ai-action-chip">${tipo === 'income' ? '💰' : '💸'} ${tipo === 'income' ? 'Receita' : 'Despesa'} registrada em Finanças: ${sign}R$ ${valor.toFixed(2)} (${Haven._escapeHtml(tx.description)})</div>`
+      };
+    }
+
+    if (name === 'concluir_habito' && Store.habits) {
+      const query = Haven._norm(args.nome_habito || '');
+      const habits = Store.habits.getAll();
+      const match = habits.find(h => Haven._norm(h.name || '').includes(query));
+      if (!match) {
+        return { result: { ok: false, error: `Hábito "${args.nome_habito}" não encontrado.` }, badgeHtml: '' };
+      }
+      const today = Utils.today();
+      const already = !!(match.checks && match.checks[today]);
+      if (!already) Store.habits.toggleCheck(match.id, today, true);
+      return {
+        result: { ok: true, id: match.id, name: match.name, alreadyDone: already },
+        badgeHtml: `<div class="haven-ai-action-chip">🔥 Hábito "${Haven._escapeHtml(match.name)}" marcado como feito hoje!</div>`
+      };
+    }
+
+    if (name === 'criar_habito' && Store.habits) {
+      const hora = (args.horario_lembrete || '').trim();
+      const habit = Store.habits.save({
+        name: String(args.nome || 'Novo Hábito').trim(),
+        category: String(args.categoria || 'pessoal').trim(),
+        type: 'do',
+        frequency: 'daily',
+        reminder: hora ? { enabled: true, time: hora, days: [0, 1, 2, 3, 4, 5, 6] } : { enabled: false }
+      });
+      if (hora && window.PWA && typeof PWA.syncRemindersToWorker === 'function') {
+        PWA.syncRemindersToWorker().catch(() => {});
+      }
+      return {
+        result: { ok: true, id: habit.id, name: habit.name, reminder: hora || null },
+        badgeHtml: `<div class="haven-ai-action-chip">✅ Hábito criado: "${Haven._escapeHtml(habit.name)}"${hora ? ` (alerta às ${hora})` : ''}</div>`
+      };
+    }
+
+    if (name === 'criar_meta' && Store.goals) {
+      const prog = Math.min(100, Math.max(0, Number(args.progresso) || 0));
+      const goal = Store.goals.save({
+        title: String(args.titulo || 'Nova Meta').trim(),
+        progress: prog,
+        category: 'pessoal'
+      });
+      return {
+        result: { ok: true, id: goal.id, title: goal.title, progress: prog },
+        badgeHtml: `<div class="haven-ai-action-chip">🎯 Meta criada: "${Haven._escapeHtml(goal.title)}" (${prog}%)</div>`
+      };
+    }
+
     return { result: { ok: false, error: 'Ação desconhecida' }, badgeHtml: '' };
   },
 
@@ -2503,10 +2652,11 @@ const HavenAI = {
   friendlyError(err) {
     if (!err) return 'Não consegui falar com a IA — respondi no modo local.';
     if (err.name === 'AbortError') return 'A IA demorou demais para responder — usei o modo local.';
-    if (err.status === 400 || err.status === 401 || err.status === 403) return 'Sua chave da API parece inválida — confira em ⚙️ Configurar IA.';
+    if (err.status === 400 || err.status === 401 || err.status === 403) return `Erro na API Gemini (${err.status}: ${err.message || 'verifique chave/modelo em ⚙️'}).`;
+    if (err.status === 404) return `Modelo Gemini não encontrado (${err.message || 'atualize o modelo em ⚙️ Configurar IA'}).`;
     if (err.status === 429) return 'Limite grátis da IA atingido por agora — voltando ao modo local.';
     if (!navigator.onLine) return 'Sem internet no momento — respondi no modo local.';
-    return 'Erro ao consultar a IA — respondi no modo local.';
+    return `Erro ao consultar a IA (${err.message || 'desconhecido'}) — respondi no modo local.`;
   }
 };
 
