@@ -350,6 +350,16 @@ const Haven = {
   // DETECÇÃO DE INTENÇÃO (local)
   // ============================================
   _detectIntent(lower) {
+    // Ação financeira direta com valor (funciona até no modo local sem gastar cota)
+    if (/(despesa|gasto|gastei|paguei|comprei|receita|ganhei|recebi|salario|pix|saldo)/.test(lower)) {
+      if (/\d+/.test(lower) && /(salva|salvar|salve|coloca|lanca|lança|registra|adiciona|gastei|paguei|comprei|recebi|ganhei|despesa|receita)/.test(lower)) {
+        return 'finance_action';
+      }
+      if (/(salva|salvar|salve|coloca|lanca|lança|registra|adiciona)/.test(lower)) {
+        return 'finance_ask_amount';
+      }
+    }
+
     const isSaveCmd = this._matchesIntent(lower, ['salvar', 'salva ', 'salva:', 'guardar', 'guarda ', 'memorizar', 'anotar', 'anota ', 'anota:', 'lembre', 'lembrar de', 'lembrar que']);
 
     // Pergunta de recordação ("qual era a palavra que eu ouvi ontem?")
@@ -392,6 +402,8 @@ const Haven = {
     const userName = Store.settings.get().userName || 'Usuário';
 
     switch (this._detectIntent(lower)) {
+      case 'finance_action': return this._handleFinanceAction(text, lower);
+      case 'finance_ask_amount': return 'Qual o valor e a descrição? Ex: <em>"gastei 250 no mercado"</em> ou <em>"recebi 500 de freela"</em>.';
       case 'recall': return this._handleRecall(text, lower);
       case 'word': return this._handleWordShare(text);
       case 'save': return this._handleSaveIntent(text, lower);
@@ -415,6 +427,34 @@ const Haven = {
   // ============================================
   // MEMÓRIA: GUARDAR PALAVRAS E RECORDAR
   // ============================================
+  _handleFinanceAction(text, lower) {
+    if (!Store.finances) return 'Módulo de Finanças indisponível.';
+    const numMatch = text.match(/(\d+(?:[.,]\d{1,2})?)/);
+    if (!numMatch) return 'Não encontrei o valor. Tente algo como: <em>"gastei 250 no mercado"</em>.';
+    const amount = parseFloat(numMatch[1].replace(',', '.'));
+    if (!amount || amount <= 0) return 'Valor inválido para lançamento.';
+
+    const isIncome = /(receita|ganhei|recebi|salario|entrada)/.test(lower);
+    const type = isIncome ? 'income' : 'expense';
+    const desc = text
+      .replace(/\b(salva|salvar|salve|coloca|lanca|lança|registra|adiciona|gastei|paguei|comprei|recebi|ganhei|uma|um|de|no|na|meu|saldo|despesa|receita)\b/gi, ' ')
+      .replace(numMatch[0], ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || (isIncome ? 'Receita (Haven)' : 'Despesa (Haven)');
+
+    Store.finances.saveTransaction({
+      type,
+      amount,
+      description: desc.slice(0, 60),
+      category: 'Outros',
+      date: Utils.today()
+    });
+
+    return isIncome
+      ? `💰 Receita de <strong>R$ ${amount.toFixed(2)}</strong> (${this._escapeHtml(desc)}) adicionada ao seu saldo!`
+      : `💸 Despesa de <strong>R$ ${amount.toFixed(2)}</strong> (${this._escapeHtml(desc)}) lançada em Finanças!`;
+  },
+
   _handleWordShare(text) {
     const mem = Store.haven.addMemory({ content: text.trim(), category: 'word', source: 'word-share' });
     return `
@@ -676,9 +716,33 @@ const Haven = {
 
     const cfg = overrideCfg || Store.haven.getVoiceConfig();
     const aiCfg = Store.haven.getAIConfig();
+    const hasElevenKey = !!(cfg.elevenLabsKey && cfg.elevenLabsKey.trim().length > 10);
     const canUseGeminiVoice = !!(aiCfg.apiKey && aiCfg.apiKey.trim());
-    const useGemini = (cfg.provider === 'gemini' && canUseGeminiVoice) ||
-                      (cfg.provider !== 'browser' && HavenAI.isReady());
+
+    const useEleven = (cfg.provider === 'elevenlabs' && hasElevenKey) ||
+                      (cfg.provider === 'auto' && hasElevenKey);
+    const useGemini = !useEleven && (
+                      (cfg.provider === 'gemini' && canUseGeminiVoice) ||
+                      (cfg.provider === 'auto' && HavenAI.isReady()));
+
+    if (useEleven) {
+      this._speakWithElevenLabs(plain, cfg, token).catch((err) => {
+        console.warn('[Haven TTS ElevenLabs]', err);
+        if (token === this._speechToken) {
+          if (typeof Utils !== 'undefined') {
+            Utils.toast(`ElevenLabs indisponível (${err?.message || 'verifique chave'}) — usando voz alternativa.`, 'warning');
+          }
+          if (canUseGeminiVoice && !(parseInt(localStorage.getItem('haven_tts_cooldown_until') || '0', 10) > Date.now())) {
+            this._speakWithGemini(plain, cfg, token).catch(() => {
+              if (token === this._speechToken) this._speakWithBrowser(plain, cfg, token);
+            });
+          } else {
+            this._speakWithBrowser(plain, cfg, token);
+          }
+        }
+      });
+      return;
+    }
 
     if (useGemini) {
       const cooldownUntil = parseInt(localStorage.getItem('haven_tts_cooldown_until') || '0', 10);
@@ -705,6 +769,67 @@ const Haven = {
     }
 
     this._speakWithBrowser(plain, cfg, token);
+  },
+
+  async _speakWithElevenLabs(plain, cfg, token) {
+    const apiKey = (cfg.elevenLabsKey || '').trim();
+    if (!apiKey) throw new Error('NO_ELEVEN_KEY');
+    const voiceId = (cfg.elevenLabsVoiceId || 'pNInz6obpgDQGcFmaJgB').trim();
+
+    if (typeof HavenOrb !== 'undefined') HavenOrb.setState('thinking');
+
+    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': apiKey,
+        'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg'
+      },
+      body: JSON.stringify({
+        text: plain.slice(0, 1500),
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: {
+          stability: 0.45,
+          similarity_boost: 0.78,
+          style: 0.25,
+          use_speaker_boost: true
+        }
+      })
+    });
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      const msg = errBody?.detail?.message || errBody?.detail?.status || `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+
+    const blob = await res.blob();
+    if (token !== this._speechToken) return;
+
+    const audioUrl = URL.createObjectURL(blob);
+    const audio = this._sharedAudio || new Audio();
+    audio.setAttribute('playsinline', 'true');
+    audio.src = audioUrl;
+    audio.playbackRate = Math.min(1.4, Math.max(0.8, Number(cfg.rate) || 1.0));
+    this._sharedAudio = audio;
+    this._currentAudio = audio;
+
+    audio.onplay = () => {
+      if (token === this._speechToken && typeof HavenOrb !== 'undefined') {
+        HavenOrb.setState('speaking');
+      }
+    };
+    const cleanup = () => {
+      URL.revokeObjectURL(audioUrl);
+      if (this._currentAudio === audio) this._currentAudio = null;
+      if (token === this._speechToken && typeof HavenOrb !== 'undefined' && !this._isListening) {
+        HavenOrb.setState('idle');
+      }
+    };
+    audio.onended = cleanup;
+    audio.onerror = cleanup;
+
+    await audio.play();
   },
 
   _pcmToWavBlob(pcmBytes, sampleRate = 24000) {
@@ -1885,6 +2010,21 @@ const Haven = {
       { id: 'Zephyr', label: '👩 Zephyr — Feminina leve e conversacional' }
     ];
 
+    const elevenDefaultVoices = [
+      { id: 'pNInz6obpgDQGcFmaJgB', label: '👨 Adam — Masculina firme e natural' },
+      { id: 'TxGEqnHWrfWFTfGW9XjX', label: '👨 Josh — Masculina jovem e fluida' },
+      { id: 'ErXwobaYiN019PkySvjV', label: '👨 Antoni — Masculina calma e clara' },
+      { id: 'VR6AewLTigWG4xSOukaG', label: '👨 Arnold — Masculina grave e marcante' },
+      { id: '21m00Tcm4TlvDq8ikWAM', label: '👩 Rachel — Feminina clara e natural' },
+      { id: 'EXAVITQu4vr4xnSDxMaL', label: '👩 Bella — Feminina suave' }
+    ];
+    const customEleven = Array.isArray(cfg.elevenLabsVoices) && cfg.elevenLabsVoices.length > 0
+      ? cfg.elevenLabsVoices
+      : [];
+    const elevenVoices = customEleven.length > 0
+      ? [...customEleven, ...elevenDefaultVoices.filter(d => !customEleven.some(c => c.id === d.id))]
+      : elevenDefaultVoices;
+
     const voiceLabel = (v) => {
       const n = v.name || '';
       const isNatural = /natural|online|google/i.test(n);
@@ -1910,22 +2050,40 @@ const Haven = {
 
         <div class="modal-body">
           <div class="haven-ai-info-box">
-            <strong>✨ Voz Neural do Gemini:</strong> Muito mais humana e expressiva do que as vozes padrão do navegador — usa a mesma chave da IA que você configurou em ⚙️.
+            <strong>🌟 ElevenLabs (10k/mês grátis):</strong> Voz humana ultra-realista em português, sem depender da cota de áudio do Gemini.
           </div>
 
           <div class="form-group">
             <label class="form-label">Motor de Voz</label>
             <select class="form-select" id="haven-voice-provider">
-              <option value="auto" ${cfg.provider === 'auto' ? 'selected' : ''}>Automático (Gemini se ativo)</option>
-              <option value="gemini" ${cfg.provider === 'gemini' ? 'selected' : ''}>✨ Gemini Neural (Realista)</option>
-              <option value="browser" ${cfg.provider === 'browser' ? 'selected' : ''}>🌐 Navegador (Offline)</option>
+              <option value="auto" ${cfg.provider === 'auto' ? 'selected' : ''}>Automático (ElevenLabs → Gemini → Aparelho)</option>
+              <option value="elevenlabs" ${cfg.provider === 'elevenlabs' ? 'selected' : ''}>🌟 ElevenLabs (Ultra-realista)</option>
+              <option value="gemini" ${cfg.provider === 'gemini' ? 'selected' : ''}>✨ Gemini Neural</option>
+              <option value="browser" ${cfg.provider === 'browser' ? 'selected' : ''}>🌐 Aparelho (Offline)</option>
             </select>
-            ${!hasGeminiKey ? `
+            ${!hasGeminiKey && !cfg.elevenLabsKey ? `
               <div style="font-size: 0.75rem; color: #fbbf24; margin-top: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-                <span>Chave Gemini ainda não configurada.</span>
+                <span>Nenhuma chave neural configurada ainda.</span>
                 <button type="button" class="btn btn-secondary sm" onclick="Haven.closeVoiceSettings(); Haven.openAISettings();" style="padding: 3px 8px; font-size: 0.72rem;">Configurar ⚙️ IA</button>
               </div>
             ` : ''}
+          </div>
+
+          <div class="form-group" style="padding: 10px 12px; background: var(--bg-surface-alt); border: 1px solid var(--border); border-radius: var(--radius-md);">
+            <label class="form-label" style="display: flex; justify-content: space-between; align-items: center;">
+              <span>Chave ElevenLabs (grátis)</span>
+              <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noopener" style="font-size: 0.74rem; color: var(--accent);">Criar chave ↗</a>
+            </label>
+            <input type="password" class="form-input" id="haven-voice-eleven-key" value="${this._escapeHtml(cfg.elevenLabsKey || '')}" placeholder="Cole sua chave sk_... da ElevenLabs" autocomplete="off" style="margin-bottom: 8px;">
+            <label class="form-label" style="display: flex; justify-content: space-between; align-items: center;">
+              <span>Voz ElevenLabs (PT-BR)</span>
+              <button type="button" class="btn btn-secondary sm" onclick="Haven.loadElevenLabsVoices()" id="haven-eleven-refresh-btn" style="padding: 2px 8px; font-size: 0.7rem;">🔄 Minhas Vozes</button>
+            </label>
+            <select class="form-select" id="haven-voice-eleven-id">
+              ${elevenVoices.map(ev => `
+                <option value="${this._escapeHtml(ev.id)}" ${(cfg.elevenLabsVoiceId || 'pNInz6obpgDQGcFmaJgB') === ev.id ? 'selected' : ''}>${this._escapeHtml(ev.label)}</option>
+              `).join('')}
+            </select>
           </div>
 
           <div class="form-group">
@@ -2010,12 +2168,47 @@ const Haven = {
   _readVoiceModalValues() {
     return {
       provider: document.getElementById('haven-voice-provider')?.value || 'auto',
-      geminiVoice: document.getElementById('haven-voice-gemini')?.value || 'Kore',
+      elevenLabsKey: (document.getElementById('haven-voice-eleven-key')?.value || '').trim(),
+      elevenLabsVoiceId: document.getElementById('haven-voice-eleven-id')?.value || 'pNInz6obpgDQGcFmaJgB',
+      geminiVoice: document.getElementById('haven-voice-gemini')?.value || 'Charon',
       voiceName: document.getElementById('haven-voice-name')?.value || '',
-      rate: parseFloat(document.getElementById('haven-voice-rate')?.value || '1.05'),
-      pitch: parseFloat(document.getElementById('haven-voice-pitch')?.value || '1.02'),
+      rate: parseFloat(document.getElementById('haven-voice-rate')?.value || '1.0'),
+      pitch: parseFloat(document.getElementById('haven-voice-pitch')?.value || '1.0'),
       autoSpeak: !!document.getElementById('haven-voice-autospeak')?.checked
     };
+  },
+
+  async loadElevenLabsVoices() {
+    const key = (document.getElementById('haven-voice-eleven-key')?.value || '').trim();
+    if (!key) {
+      Utils.toast('Cole sua chave da ElevenLabs primeiro.', 'warning');
+      return;
+    }
+    const btn = document.getElementById('haven-eleven-refresh-btn');
+    if (btn) btn.disabled = true;
+    try {
+      const res = await fetch('https://api.elevenlabs.io/v1/voices', {
+        headers: { 'xi-api-key': key }
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const list = (data.voices || []).map(v => ({
+        id: v.voice_id,
+        label: `${v.labels?.gender === 'female' ? '👩' : '👨'} ${v.name}${v.labels?.accent ? ` (${v.labels.accent})` : ''}`
+      }));
+      if (list.length > 0) {
+        Store.haven.saveVoiceConfig({ elevenLabsVoices: list, elevenLabsKey: key });
+        const sel = document.getElementById('haven-voice-eleven-id');
+        if (sel) {
+          sel.innerHTML = list.map(v => `<option value="${this._escapeHtml(v.id)}">${this._escapeHtml(v.label)}</option>`).join('');
+        }
+        Utils.toast(`${list.length} voz(es) carregada(s) da sua conta ElevenLabs!`, 'success');
+      }
+    } catch (err) {
+      Utils.toast('Erro ao buscar vozes da ElevenLabs — confira sua chave.', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   },
 
   testVoiceSettings() {

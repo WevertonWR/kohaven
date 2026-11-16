@@ -2438,11 +2438,23 @@
   scroll-behavior: smooth;
 }
 
+.haven-chat-stream .haven-msg {
+  max-width: 92%;
+}
+
 .haven-chat-stream .haven-bubble-bot {
+  width: 100%;
   background: rgba(12, 18, 38, 0.28);
   border: 1px solid rgba(255, 255, 255, 0.11);
   backdrop-filter: blur(16px) saturate(135%);
   -webkit-backdrop-filter: blur(16px) saturate(135%);
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+.haven-chat-stream .haven-summary-card {
+  padding: 10px 12px;
+  margin: 4px 0;
 }
 
 /* Caixinha de Resposta / Input com Efeito de Vidro */

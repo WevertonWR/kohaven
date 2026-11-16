@@ -785,10 +785,13 @@ const Store = {
     getVoiceConfig() {
       return {
         provider: 'auto',
-        geminiVoice: 'Kore',
+        geminiVoice: 'Charon',
+        elevenLabsKey: '',
+        elevenLabsVoiceId: 'pNInz6obpgDQGcFmaJgB',
+        elevenLabsVoices: [],
         voiceName: '',
-        rate: 1.05,
-        pitch: 1.02,
+        rate: 1.0,
+        pitch: 1.0,
         autoSpeak: true,
         ...(Store._get('haven_voice_config') || {})
       };
@@ -832,7 +835,14 @@ const Store = {
     const data = {};
     keys.forEach(key => {
       const val = Store._get(key);
-      if (val !== null) data[key] = val;
+      if (val !== null) {
+        if (key === 'haven_voice_config' && typeof val === 'object') {
+          const { elevenLabsKey, ...safeVoice } = val;
+          data[key] = safeVoice;
+        } else {
+          data[key] = val;
+        }
+      }
     });
     data._exportDate = new Date().toISOString();
     data._version = '1.0.0';
