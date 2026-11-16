@@ -662,10 +662,12 @@ const Haven = {
     let text = tmp.textContent || '';
     // Remover emojis e símbolos decorativos
     text = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ' ');
-    // Normalizar moeda e pontuação para leitura natural
+    // Normalizar moeda e pontuação para leitura natural em PT-BR
     text = text
-      .replace(/R\$\s*(\d+(?:\.\d{3})*),00\b/g, '$1 reais')
-      .replace(/R\$\s*(\d+(?:\.\d{3})*),(\d{2})\b/g, '$1 reais e $2 centavos')
+      .replace(/R\$\s*(\d+(?:\.\d{3})*)[.,]00\b/g, (_, n) => `${n.replace(/\./g, '')} reais`)
+      .replace(/R\$\s*(\d+(?:\.\d{3})*)[.,](\d{2})\b/g, (_, n, c) => `${n.replace(/\./g, '')} reais e ${parseInt(c, 10)} centavos`)
+      .replace(/R\$\s*(\d+(?:\.\d{3})*)\b/g, (_, n) => `${n.replace(/\./g, '')} reais`)
+      .replace(/%/g, ' por cento')
       .replace(/[•|]+/g, ', ')
       .replace(/\s*—\s*/g, ', ')
       .replace(/\.{2,}/g, '.')
@@ -787,11 +789,12 @@ const Haven = {
       },
       body: JSON.stringify({
         text: plain.slice(0, 1500),
-        model_id: 'eleven_multilingual_v2',
+        model_id: 'eleven_flash_v2_5',
+        language_code: 'pt',
         voice_settings: {
-          stability: 0.45,
-          similarity_boost: 0.78,
-          style: 0.25,
+          stability: 0.38,
+          similarity_boost: 0.75,
+          style: 0.35,
           use_speaker_boost: true
         }
       })
@@ -802,6 +805,12 @@ const Haven = {
       const msg = errBody?.detail?.message || errBody?.detail?.status || `HTTP ${res.status}`;
       throw new Error(msg);
     }
+
+    const costHeader = parseInt(res.headers.get('character-cost') || '0', 10);
+    const usedCost = costHeader > 0 ? costHeader : Math.ceil(Math.min(plain.length, 1500) * 0.5);
+    try {
+      localStorage.setItem('haven_eleven_last_cost', String(usedCost));
+    } catch (e) {}
 
     const blob = await res.blob();
     if (token !== this._speechToken) return;
@@ -1811,6 +1820,22 @@ const Haven = {
 
     document.body.appendChild(modal);
     setTimeout(() => modal.classList.add('active'), 30);
+
+    if (cfg.elevenLabsKey) {
+      const credEl = document.getElementById('haven-eleven-credits');
+      fetch('https://api.elevenlabs.io/v1/user/subscription', {
+        headers: { 'xi-api-key': cfg.elevenLabsKey.trim() }
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(sub => {
+          if (!credEl || !sub) return;
+          const used = sub.character_count ?? 0;
+          const limit = sub.character_limit ?? 10000;
+          const lc = localStorage.getItem('haven_eleven_last_cost');
+          credEl.innerHTML = `Créditos ElevenLabs: <strong>${used.toLocaleString('pt-BR')} / ${limit.toLocaleString('pt-BR')}</strong> usados${lc ? ` · Última fala: ~${lc}` : ''}`;
+        })
+        .catch(() => {});
+    }
   },
 
   closeMemories() {
@@ -1977,6 +2002,22 @@ const Haven = {
 
     document.body.appendChild(modal);
     setTimeout(() => modal.classList.add('active'), 30);
+
+    if (cfg.elevenLabsKey) {
+      const credEl = document.getElementById('haven-eleven-credits');
+      fetch('https://api.elevenlabs.io/v1/user/subscription', {
+        headers: { 'xi-api-key': cfg.elevenLabsKey.trim() }
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(sub => {
+          if (!credEl || !sub) return;
+          const used = sub.character_count ?? 0;
+          const limit = sub.character_limit ?? 10000;
+          const lc = localStorage.getItem('haven_eleven_last_cost');
+          credEl.innerHTML = `Créditos ElevenLabs: <strong>${used.toLocaleString('pt-BR')} / ${limit.toLocaleString('pt-BR')}</strong> usados${lc ? ` · Última fala: ~${lc}` : ''}`;
+        })
+        .catch(() => {});
+    }
   },
 
   closeAISettings() {
@@ -2084,6 +2125,12 @@ const Haven = {
                 <option value="${this._escapeHtml(ev.id)}" ${(cfg.elevenLabsVoiceId || 'pNInz6obpgDQGcFmaJgB') === ev.id ? 'selected' : ''}>${this._escapeHtml(ev.label)}</option>
               `).join('')}
             </select>
+            <div id="haven-eleven-credits" style="font-size: 0.74rem; color: var(--text-muted); margin-top: 6px;">
+              ${(() => {
+                const lc = localStorage.getItem('haven_eleven_last_cost');
+                return lc ? `Última fala: ~${lc} crédito(s) (1 letra ≈ 0,5 crédito).` : 'Modelo rápido PT-BR: ~0,5 crédito por letra.';
+              })()}
+            </div>
           </div>
 
           <div class="form-group">
@@ -2155,6 +2202,22 @@ const Haven = {
 
     document.body.appendChild(modal);
     setTimeout(() => modal.classList.add('active'), 30);
+
+    if (cfg.elevenLabsKey) {
+      const credEl = document.getElementById('haven-eleven-credits');
+      fetch('https://api.elevenlabs.io/v1/user/subscription', {
+        headers: { 'xi-api-key': cfg.elevenLabsKey.trim() }
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(sub => {
+          if (!credEl || !sub) return;
+          const used = sub.character_count ?? 0;
+          const limit = sub.character_limit ?? 10000;
+          const lc = localStorage.getItem('haven_eleven_last_cost');
+          credEl.innerHTML = `Créditos ElevenLabs: <strong>${used.toLocaleString('pt-BR')} / ${limit.toLocaleString('pt-BR')}</strong> usados${lc ? ` · Última fala: ~${lc}` : ''}`;
+        })
+        .catch(() => {});
+    }
   },
 
   closeVoiceSettings() {
