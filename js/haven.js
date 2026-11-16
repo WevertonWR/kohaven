@@ -330,8 +330,10 @@ const Haven = {
 
   // Decide se a pergunta deve ir para a IA
   _needsAI(lower, intent) {
-    if (intent === null || intent === 'advice' || intent === 'recall') return true;
-    return false;
+    // Quando a IA está ativa, só atalhos locais exatos ficam no modo local
+    const exactLocal = ['summary', 'finances', 'habits', 'goals', 'pomodoro'];
+    if (exactLocal.includes(intent)) return false;
+    return true;
   },
 
   _norm(str) {
@@ -1207,6 +1209,10 @@ const Haven = {
   // ============================================
   // RECONHECIMENTO DE VOZ (Web Speech API)
   // ============================================
+  _mediaRecorder: null,
+  _audioChunks: [],
+  _audioStream: null,
+
   toggleVoice() {
     if (this._isListening) {
       this.stopVoice();
@@ -1217,10 +1223,16 @@ const Haven = {
   },
 
   startVoice() {
+    // Quando a IA Gemini está ativa, gravar áudio real (funciona no iPhone PWA e Android!)
+    if (HavenAI.isReady() && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder) {
+      this._startAudioRecording();
+      return;
+    }
+
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      Utils.toast('Reconhecimento de voz não suportado neste navegador.', 'error');
+      Utils.toast('Para gravar áudio neste aparelho, ative a IA do Gemini em ⚙️ Configurar IA.', 'warning');
       return;
     }
 
@@ -1247,7 +1259,6 @@ const Haven = {
       }
       this._voiceTranscript = full.trim();
 
-      // Mostrar prévia ao vivo só no status do orbe (sem jogar texto na caixinha)
       const stateText = document.getElementById('haven-orb-state-text');
       if (stateText && this._voiceTranscript) {
         stateText.textContent = `“${this._voiceTranscript}”`;
@@ -1267,10 +1278,14 @@ const Haven = {
       this._voiceSent = true;
       this.stopVoice();
 
-      if (event.error === 'not-allowed') {
-        Utils.toast('Permissão de microfone negada. Ative nas configurações do navegador.', 'error');
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        Utils.toast('Microfone bloqueado pelo navegador. Ative a IA do Gemini em ⚙️ para gravar áudio real.', 'error');
       } else if (event.error === 'no-speech') {
         Utils.toast('Nenhuma fala detectada. Tente novamente.', 'warning');
+      } else if (event.error === 'audio-capture') {
+        Utils.toast('Nenhum microfone encontrado.', 'error');
+      } else if (event.error === 'network') {
+        Utils.toast('Erro de rede no reconhecimento de voz.', 'error');
       }
     };
 
@@ -1278,7 +1293,6 @@ const Haven = {
       const pending = (this._voiceTranscript || '').trim();
       const alreadySent = this._voiceSent;
       this.stopVoice();
-      // No celular, muitos navegadores encerram sem marcar isFinal — enviar direto aqui
       if (!alreadySent && pending) {
         this._voiceSent = true;
         this._sendVoiceTranscript(pending);
@@ -1292,9 +1306,102 @@ const Haven = {
     }
   },
 
+  async _startAudioRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this._audioStream = stream;
+      this._audioChunks = [];
+
+      const mimeTypes = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg'];
+      const chosenMime = mimeTypes.find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+      const recorder = chosenMime ? new MediaRecorder(stream, { mimeType: chosenMime }) : new MediaRecorder(stream);
+      this._mediaRecorder = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) this._audioChunks.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const chunks = this._audioChunks.slice();
+        const mime = recorder.mimeType || chosenMime || 'audio/mp4';
+        this._cleanupAudioStream();
+        if (!chunks.length) return;
+        const blob = new Blob(chunks, { type: mime });
+        if (blob.size < 400) return;
+        this._processAudioBlob(blob, mime);
+      };
+
+      recorder.start();
+      this._isListening = true;
+      const orb = document.getElementById('haven-mic-orb');
+      if (orb) orb.classList.add('is-listening');
+      if (typeof HavenOrb !== 'undefined') HavenOrb.setState('listening');
+      const stateText = document.getElementById('haven-orb-state-text');
+      if (stateText) stateText.textContent = 'Ouvindo... toque no microfone para enviar';
+    } catch (err) {
+      this._cleanupAudioStream();
+      this._isListening = false;
+      Utils.toast('Permissão de microfone negada no aparelho.', 'error');
+    }
+  },
+
+  _cleanupAudioStream() {
+    if (this._audioStream) {
+      this._audioStream.getTracks().forEach(t => t.stop());
+      this._audioStream = null;
+    }
+    this._mediaRecorder = null;
+  },
+
+  _processAudioBlob(blob, mimeType) {
+    if (this._isProcessing) return;
+    this._isProcessing = true;
+    this._addUserMessage('🎤 Mensagem de voz');
+    this._showTypingIndicator();
+    if (typeof HavenOrb !== 'undefined') HavenOrb.setState('thinking');
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = String(reader.result || '');
+      const base64 = dataUrl.split(',')[1] || '';
+      if (!base64) {
+        this._removeTypingIndicator();
+        this._isProcessing = false;
+        if (typeof HavenOrb !== 'undefined') HavenOrb.setState('idle');
+        return;
+      }
+      const cleanMime = (mimeType || 'audio/mp4').split(';')[0];
+      HavenAI.ask('Ouça o áudio do usuário em português e responda naturalmente.', '', {
+        inlineData: { mimeType: cleanMime, data: base64 }
+      })
+        .then(html => {
+          this._removeTypingIndicator();
+          this._addBotMessage(html, 'ai');
+          this._isProcessing = false;
+          this._refreshAIStatus();
+          const voiceCfg = Store.haven.getVoiceConfig();
+          if (voiceCfg.autoSpeak !== false) {
+            this.speak(this._chatHistory.length - 1);
+          } else if (typeof HavenOrb !== 'undefined') {
+            HavenOrb.setState('idle');
+          }
+        })
+        .catch(err => {
+          this._removeTypingIndicator();
+          this._addBotMessage(this._aiNotice(HavenAI.friendlyError(err)), 'local');
+          this._isProcessing = false;
+          if (typeof HavenOrb !== 'undefined') HavenOrb.setState('idle');
+        });
+    };
+    reader.readAsDataURL(blob);
+  },
+
   stopVoice() {
     this._isListening = false;
 
+    if (this._mediaRecorder && this._mediaRecorder.state !== 'inactive') {
+      try { this._mediaRecorder.stop(); } catch (e) { this._cleanupAudioStream(); }
+    }
     if (this._recognition) {
       try { this._recognition.stop(); } catch (e) {}
     }
@@ -1937,16 +2044,9 @@ const Haven = {
     else greeting = 'Boa noite';
 
     return `
-      <strong>${greeting}, ${this._escapeHtml(userName)}! 👋</strong><br><br>
-      Eu sou o <strong>Haven</strong>, seu assistente inteligente pessoal do Korhaven. Posso te ajudar com:
-      <br><br>
-      🎤 <strong>Reconhecimento de Voz</strong> — fale diretamente comigo<br>
-      💾 <strong>Salvar Informações</strong> — guardo na memória para você<br>
-      📋 <strong>Resumos Diários</strong> — visão completa do seu dia<br>
-      🔍 <strong>Buscar</strong> — encontro qualquer coisa que você salvou<br>
-      💰🔥🎯 <strong>Panoramas</strong> — finanças, hábitos e metas<br>
-      <br>
-      <span style="font-size: 0.82rem; color: var(--text-muted);">Dica: Use o botão 🎤 ou os atalhos rápidos abaixo!</span>
+      <strong>${greeting}, ${this._escapeHtml(userName)}!</strong><br>
+      <span style="color: var(--text-secondary);">Toque no microfone para conversar ou escreva abaixo.</span>
+      ${!HavenAI.isReady() ? `<div style="margin-top: 10px;"><button class="haven-inline-btn" onclick="Haven.openAISettings()">✨ Ativar IA Gemini (Voz + Respostas)</button></div>` : ''}
     `;
   },
 
@@ -2088,14 +2188,18 @@ const HavenAI = {
     }
   },
 
-  async ask(userText, userLower) {
+  async ask(userText, userLower, audioPart = null) {
     const cfg = Store.haven.getAIConfig();
     const model = cfg.model || 'gemini-2.5-flash';
     const apiKey = cfg.apiKey.trim();
 
+    const userParts = audioPart
+      ? [{ text: userText || 'Ouça o áudio do usuário em português e responda naturalmente.' }, audioPart]
+      : [{ text: userText }];
+
     const contents = [
       ...this._buildHistoryContents(),
-      { role: 'user', parts: [{ text: userText }] }
+      { role: 'user', parts: userParts }
     ];
 
     const systemInstruction = { parts: [{ text: this._buildSystemPrompt(userLower) }] };

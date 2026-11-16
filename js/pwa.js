@@ -486,7 +486,7 @@ const PWA = {
     return reminders;
   },
 
-  async syncRemindersToWorker(subscriptionOverride = null) {
+  async syncRemindersToWorker(subscriptionOverride = null, showToast = false) {
     const cfg = this.getPushConfig();
     const baseUrl = (cfg.workerUrl || '').trim().replace(/\/+$/, '');
     if (!baseUrl) return { synced: false, reason: 'no_url' };
@@ -514,6 +514,9 @@ const PWA = {
 
     if (!res.ok) throw new Error(`SYNC_HTTP_${res.status}`);
     this.savePushConfig({ lastSync: Date.now() });
+    if (showToast && typeof Utils !== 'undefined') {
+      Utils.toast(`☁️ Push em 2º plano sincronizado (${reminders.length})`, 'info');
+    }
     return { synced: true, count: reminders.length };
   },
 

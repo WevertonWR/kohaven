@@ -688,7 +688,7 @@ const Habits = {
 
     Store.habits.save(data);
     if (window.PWA && typeof PWA.checkReminders === 'function') PWA.checkReminders();
-    if (window.PWA && typeof PWA.syncRemindersToWorker === 'function') PWA.syncRemindersToWorker().catch(() => {});
+    if (window.PWA && typeof PWA.syncRemindersToWorker === 'function') PWA.syncRemindersToWorker(null, true).catch(() => {});
     this.closeModal();
     Utils.toast(editId ? 'Hábito atualizado!' : 'Hábito criado! ✅', 'success');
     App.renderCurrentPage();
@@ -697,7 +697,7 @@ const Habits = {
   confirmDelete(id) {
     Utils.confirm('Excluir este hábito e todo o histórico?', () => {
       Store.habits.delete(id);
-      if (window.PWA && typeof PWA.syncRemindersToWorker === 'function') PWA.syncRemindersToWorker().catch(() => {});
+      if (window.PWA && typeof PWA.syncRemindersToWorker === 'function') PWA.syncRemindersToWorker(null, true).catch(() => {});
       Utils.toast('Hábito removido', 'danger');
       App.renderCurrentPage();
     });
