@@ -232,6 +232,7 @@ const Haven = {
   // ENVIO DE MENSAGEM
   // ============================================
   sendMessage(fromVoice = false) {
+    this._unlockAudio();
     const input = document.getElementById('haven-text-input');
     if (!input) return;
 
@@ -552,6 +553,26 @@ const Haven = {
   // VOZ: OUVIR RESPOSTA (voz natural e fluida)
   // ============================================
   _speechToken: 0,
+  _sharedAudio: null,
+
+  _unlockAudio() {
+    try {
+      if (!this._sharedAudio) {
+        this._sharedAudio = new Audio();
+        this._sharedAudio.setAttribute('playsinline', 'true');
+      }
+      // Desbloquear áudio no iOS/Safari dentro do toque do usuário
+      this._sharedAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+      const p = this._sharedAudio.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => {
+          if (this._sharedAudio && this._sharedAudio.src.startsWith('data:audio/wav')) {
+            this._sharedAudio.pause();
+          }
+        }).catch(() => {});
+      }
+    } catch (e) {}
+  },
 
   _scoreVoice(v) {
     const name = (v.name || '').toLowerCase();
@@ -744,8 +765,11 @@ const Haven = {
     if (token !== this._speechToken) return;
 
     const audioUrl = URL.createObjectURL(blob);
-    const audio = new Audio(audioUrl);
+    const audio = this._sharedAudio || new Audio();
+    audio.setAttribute('playsinline', 'true');
+    audio.src = audioUrl;
     audio.playbackRate = Math.min(1.4, Math.max(0.8, Number(cfg.rate) || 1.0));
+    this._sharedAudio = audio;
     this._currentAudio = audio;
 
     audio.onplay = () => {
@@ -810,10 +834,14 @@ const Haven = {
       speechSynthesis.speak(u);
     };
 
-    speakNext();
+    // No iOS Safari, chamar speak() imediatamente após cancel() descarta a fala — aguardar 65ms
+    setTimeout(() => {
+      if (token === this._speechToken) speakNext();
+    }, 65);
   },
 
   speak(idx) {
+    this._unlockAudio();
     const msg = this._chatHistory[idx];
     if (!msg) return;
     if ((this._currentAudio && !this._currentAudio.paused) ||
@@ -1214,6 +1242,7 @@ const Haven = {
   _audioStream: null,
 
   toggleVoice() {
+    this._unlockAudio();
     if (this._isListening) {
       this.stopVoice();
     } else {
@@ -1851,9 +1880,9 @@ const Haven = {
           <div class="form-group">
             <label class="form-label">Motor de Voz</label>
             <select class="form-select" id="haven-voice-provider">
-              <option value="auto" ${cfg.provider === 'auto' ? 'selected' : ''}>Automático (Gemini Neural quando IA ativa)</option>
-              <option value="gemini" ${cfg.provider === 'gemini' ? 'selected' : ''}>✨ Sempre Gemini Neural (Ultra-realista)</option>
-              <option value="browser" ${cfg.provider === 'browser' ? 'selected' : ''}>🌐 Navegador (Grátis / Offline)</option>
+              <option value="auto" ${cfg.provider === 'auto' ? 'selected' : ''}>Automático (Gemini se ativo)</option>
+              <option value="gemini" ${cfg.provider === 'gemini' ? 'selected' : ''}>✨ Gemini Neural (Realista)</option>
+              <option value="browser" ${cfg.provider === 'browser' ? 'selected' : ''}>🌐 Navegador (Offline)</option>
             </select>
             ${!hasGeminiKey ? `
               <div style="font-size: 0.75rem; color: #fbbf24; margin-top: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
@@ -1876,7 +1905,7 @@ const Haven = {
             <label class="form-label">Voz Alternativa do Navegador (Fallback)</label>
             <select class="form-select" id="haven-voice-name">
               <option value="" ${!cfg.voiceName ? 'selected' : ''}>
-                Automática — Melhor disponível${bestAuto ? ` (${voiceLabel(bestAuto)})` : ''}
+                Automática${bestAuto ? ` (${bestAuto.name.replace(/Microsoft\s+/i, '').split(' - ')[0]})` : ''}
               </option>
               ${voices.map(v => `
                 <option value="${this._escapeHtml(v.name)}" ${v.name === cfg.voiceName ? 'selected' : ''}>
@@ -1954,6 +1983,7 @@ const Haven = {
   },
 
   testVoiceSettings() {
+    this._unlockAudio();
     const cfg = this._readVoiceModalValues();
     this._speakText('Olá! Eu sou o Haven. Agora estou falando de um jeito mais natural e fluido com você.', cfg);
   },

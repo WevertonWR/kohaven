@@ -2220,11 +2220,29 @@
 
 /* ---- Haven v2: Layout Simples Estilo Sandra AI ---- */
 .haven-shell {
+  width: 100%;
   max-width: 820px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+/* Impedir modais do Haven/PWA de deslizar para os lados no celular */
+.modal {
+  max-width: calc(100vw - 24px);
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+.modal .form-select,
+.modal .form-input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  text-overflow: ellipsis;
 }
 
 .haven-topbar {
