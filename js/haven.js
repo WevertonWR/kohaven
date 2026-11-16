@@ -1403,8 +1403,9 @@ const Haven = {
   _audioStream: null,
 
   toggleVoice() {
-    this._unlockAudio();
     if (this._isListening) {
+      // Desbloquear áudio no toque de envio (sem conflitar com a captura do microfone no iOS)
+      this._unlockAudio();
       this.stopVoice();
     } else {
       this.stopSpeaking();
@@ -1598,6 +1599,7 @@ const Haven = {
     this._isListening = false;
 
     if (this._mediaRecorder && this._mediaRecorder.state !== 'inactive') {
+      try { if (typeof this._mediaRecorder.requestData === 'function') this._mediaRecorder.requestData(); } catch (e) {}
       try { this._mediaRecorder.stop(); } catch (e) { this._cleanupAudioStream(); }
     }
     if (this._recognition) {
