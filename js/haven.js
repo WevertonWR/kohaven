@@ -1566,7 +1566,8 @@ const Haven = {
         if (typeof HavenOrb !== 'undefined') HavenOrb.setState('idle');
         return;
       }
-      const cleanMime = (mimeType || 'audio/mp4').split(';')[0];
+      let cleanMime = (mimeType || 'audio/mp4').split(';')[0].trim().toLowerCase();
+      if (!cleanMime || cleanMime === 'video/mp4') cleanMime = 'audio/mp4';
       HavenAI.ask('Ouça o áudio do usuário em português e responda naturalmente.', '', {
         inlineData: { mimeType: cleanMime, data: base64 }
       })
@@ -1586,6 +1587,7 @@ const Haven = {
           this._removeTypingIndicator();
           this._addBotMessage(this._aiNotice(HavenAI.friendlyError(err)), 'local');
           this._isProcessing = false;
+          this._refreshAIStatus();
           if (typeof HavenOrb !== 'undefined') HavenOrb.setState('idle');
         });
     };
@@ -2966,11 +2968,12 @@ const HavenAI = {
   friendlyError(err) {
     if (!err) return 'Não consegui falar com a IA — respondi no modo local.';
     if (err.name === 'AbortError') return 'A IA demorou demais para responder — usei o modo local.';
-    if (err.status === 400 || err.status === 401 || err.status === 403) return 'A chave da API foi recusada — confira em ⚙️ Configurar IA.';
+    if (err.status === 400 || err.status === 401 || err.status === 403) return `Erro na API (${err.status}): ${(err.message || 'confira chave/modelo em ⚙️').slice(0, 90)}`;
     if (err.status === 404) return 'Modelo Gemini indisponível — toque em ⚙️ → 🔌 Testar Conexão para atualizar.';
     if (err.status === 429) return 'Limite grátis da IA atingido por agora — voltando ao modo local.';
     if (!navigator.onLine) return 'Sem internet no momento — respondi no modo local.';
-    return 'Erro ao consultar a IA — respondi no modo local.';
+    const detail = [err.status || err.name, err.message].filter(Boolean).join(': ').slice(0, 100);
+    return `Erro ao consultar a IA (${detail || 'desconhecido'}) — respondi no modo local.`;
   }
 };
 
