@@ -194,15 +194,15 @@ const Habits = {
                   <input type="time" class="form-input" id="habit-notify-time" value="08:00">
                 </div>
                 <div class="form-group" style="margin-bottom: 0;">
-                  <label class="form-label">Quais dias alertar?</label>
+                  <label class="form-label">Quais dias alertar? <span style="font-weight: 400; color: var(--text-muted); font-size: 0.72rem;">(com ✓ = ativo)</span></label>
                   <div style="display: flex; gap: var(--space-2); flex-wrap: wrap;">
-                    <label class="tag" style="cursor:pointer;"><input type="checkbox" value="0" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Dom</label>
-                    <label class="tag" style="cursor:pointer;"><input type="checkbox" value="1" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Seg</label>
-                    <label class="tag" style="cursor:pointer;"><input type="checkbox" value="2" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Ter</label>
-                    <label class="tag" style="cursor:pointer;"><input type="checkbox" value="3" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Qua</label>
-                    <label class="tag" style="cursor:pointer;"><input type="checkbox" value="4" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Qui</label>
-                    <label class="tag" style="cursor:pointer;"><input type="checkbox" value="5" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Sex</label>
-                    <label class="tag" style="cursor:pointer;"><input type="checkbox" value="6" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Sáb</label>
+                    <label class="tag notify-day-pill" style="cursor:pointer;"><input type="checkbox" value="0" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Dom</label>
+                    <label class="tag notify-day-pill" style="cursor:pointer;"><input type="checkbox" value="1" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Seg</label>
+                    <label class="tag notify-day-pill" style="cursor:pointer;"><input type="checkbox" value="2" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Ter</label>
+                    <label class="tag notify-day-pill" style="cursor:pointer;"><input type="checkbox" value="3" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Qua</label>
+                    <label class="tag notify-day-pill" style="cursor:pointer;"><input type="checkbox" value="4" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Qui</label>
+                    <label class="tag notify-day-pill" style="cursor:pointer;"><input type="checkbox" value="5" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Sex</label>
+                    <label class="tag notify-day-pill" style="cursor:pointer;"><input type="checkbox" value="6" class="notify-day-cb" style="display:none;" onchange="Habits.toggleNotifyDay(this)"> Sáb</label>
                   </div>
                 </div>
               </div>
@@ -540,6 +540,7 @@ const Habits = {
       const reminderDays = Array.isArray(reminder.days) ? reminder.days : [0, 1, 2, 3, 4, 5, 6];
       document.querySelectorAll('.notify-day-cb').forEach(cb => {
         cb.checked = reminderDays.includes(parseInt(cb.value));
+        cb.parentElement.classList.toggle('is-selected', cb.checked);
         cb.parentElement.classList.toggle('tag-accent', cb.checked);
       });
     } else {
@@ -568,7 +569,7 @@ const Habits = {
       if (notifyTime) notifyTime.value = '08:00';
       document.querySelectorAll('.notify-day-cb').forEach(cb => {
         cb.checked = true;
-        cb.parentElement.classList.add('tag-accent');
+        cb.parentElement.classList.add('is-selected', 'tag-accent');
       });
     }
     this.toggleFrequencyOptions();
@@ -623,6 +624,7 @@ const Habits = {
   },
 
   toggleNotifyDay(cb) {
+    cb.parentElement.classList.toggle('is-selected', cb.checked);
     cb.parentElement.classList.toggle('tag-accent', cb.checked);
   },
 

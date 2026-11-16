@@ -271,67 +271,88 @@ export default {
   async scheduled(event, env) {
     if (!env.KORHAVEN_PUSH_KV || !env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) return;
 
-    await env.KORHAVEN_PUSH_KV.put('meta:last_cron', JSON.stringify({ at: Date.now() }));
-
     const list = await env.KORHAVEN_PUSH_KV.list({ prefix: 'device:' });
+    const debugDevices = [];
+
     for (const item of list.keys) {
-      const record = await env.KORHAVEN_PUSH_KV.get(item.name, { type: 'json' });
-      if (!record || !record.subscription || !Array.isArray(record.reminders)) continue;
-
-      const { todayStr, nowMinutes, dayOfWeek } = getLocalClock(record.timezoneOffset ?? -180);
-      const sentKeys = {};
-      for (const [k, v] of Object.entries(record.sentKeys || {})) {
-        if (k.includes(`_${todayStr}_`)) sentKeys[k] = v;
-      }
-
-      let dirty = false;
-      for (const rem of record.reminders) {
-        if (rem.kind === 'habit') {
-          const days = Array.isArray(rem.days) ? rem.days : [0, 1, 2, 3, 4, 5, 6];
-          const targetMin = toMinutes(rem.time);
-          const diff = nowMinutes - targetMin;
-          if (!days.includes(dayOfWeek) || targetMin < 0 || diff < 0 || diff > 2) continue;
-          const sentKey = `habit_${rem.id}_${todayStr}_${rem.time}`;
-          if (sentKeys[sentKey]) continue;
-
-          const status = await sendWebPush(
-            record.subscription,
-            { title: rem.title, body: rem.body, url: '#habits' },
-            env
-          );
-          if (status === 404 || status === 410) {
-            await env.KORHAVEN_PUSH_KV.delete(item.name);
-            dirty = false;
-            break;
-          }
-          sentKeys[sentKey] = true;
-          dirty = true;
-        } else if (rem.kind === 'note') {
-          const targetMin = toMinutes(rem.time);
-          const diff = nowMinutes - targetMin;
-          if (rem.date !== todayStr || targetMin < 0 || diff < 0 || diff > 2) continue;
-          const sentKey = `note_${rem.id}_${todayStr}_${rem.time}`;
-          if (sentKeys[sentKey]) continue;
-
-          const status = await sendWebPush(
-            record.subscription,
-            { title: rem.title, body: rem.body, url: `./#notes?noteId=${encodeURIComponent(rem.id)}` },
-            env
-          );
-          if (status === 404 || status === 410) {
-            await env.KORHAVEN_PUSH_KV.delete(item.name);
-            dirty = false;
-            break;
-          }
-          sentKeys[sentKey] = true;
-          dirty = true;
+      const devDebug = { key: item.name, clock: null, reminders: [], pushes: [], error: null };
+      try {
+        const record = await env.KORHAVEN_PUSH_KV.get(item.name, { type: 'json' });
+        if (!record || !record.subscription || !Array.isArray(record.reminders)) {
+          devDebug.error = 'invalid_record';
+          debugDevices.push(devDebug);
+          continue;
         }
-      }
 
-      if (dirty) {
-        record.sentKeys = sentKeys;
-        await env.KORHAVEN_PUSH_KV.put(item.name, JSON.stringify(record));
+        const { todayStr, timeStr, nowMinutes, dayOfWeek } = getLocalClock(record.timezoneOffset ?? -180);
+        const sentKeys = {};
+        for (const [k, v] of Object.entries(record.sentKeys || {})) {
+          if (k.includes(`_${todayStr}_`)) sentKeys[k] = v;
+        }
+
+        devDebug.clock = `${todayStr} ${timeStr} (d=${dayOfWeek})`;
+        devDebug.reminders = record.reminders.map(r => `${r.kind}:${r.date || '*'}:${r.time}`);
+
+        let dirty = false;
+        for (const rem of record.reminders) {
+          if (rem.kind === 'habit') {
+            const days = Array.isArray(rem.days) ? rem.days : [0, 1, 2, 3, 4, 5, 6];
+            const targetMin = toMinutes(rem.time);
+            const diff = nowMinutes - targetMin;
+            if (!days.includes(dayOfWeek) || targetMin < 0 || diff < 0 || diff > 2) continue;
+            const sentKey = `habit_${rem.id}_${todayStr}_${rem.time}`;
+            if (sentKeys[sentKey]) continue;
+
+            const status = await sendWebPush(
+              record.subscription,
+              { title: rem.title, body: rem.body, url: '#habits' },
+              env
+            );
+            devDebug.pushes.push({ kind: 'habit', time: rem.time, status });
+            if (status === 404 || status === 410) {
+              await env.KORHAVEN_PUSH_KV.delete(item.name);
+              dirty = false;
+              break;
+            }
+            sentKeys[sentKey] = true;
+            dirty = true;
+          } else if (rem.kind === 'note') {
+            const targetMin = toMinutes(rem.time);
+            const diff = nowMinutes - targetMin;
+            if (rem.date !== todayStr || targetMin < 0 || diff < 0 || diff > 2) continue;
+            const sentKey = `note_${rem.id}_${todayStr}_${rem.time}`;
+            if (sentKeys[sentKey]) continue;
+
+            const status = await sendWebPush(
+              record.subscription,
+              { title: rem.title, body: rem.body, url: `./#notes?noteId=${encodeURIComponent(rem.id)}` },
+              env
+            );
+            devDebug.pushes.push({ kind: 'note', time: rem.time, status });
+            if (status === 404 || status === 410) {
+              await env.KORHAVEN_PUSH_KV.delete(item.name);
+              dirty = false;
+              break;
+            }
+            sentKeys[sentKey] = true;
+            dirty = true;
+          }
+        }
+
+        if (dirty) {
+          record.sentKeys = sentKeys;
+          await env.KORHAVEN_PUSH_KV.put(item.name, JSON.stringify(record));
+        }
+      } catch (err) {
+        devDebug.error = String(err && err.message || err);
       }
+      debugDevices.push(devDebug);
     }
+
+    await env.KORHAVEN_PUSH_KV.put('meta:last_cron', JSON.stringify({
+      at: Date.now(),
+      deviceCount: list.keys.length,
+      devices: debugDevices
+    }));
   }
 };

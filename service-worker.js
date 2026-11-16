@@ -1,5 +1,5 @@
 // KORHAVEN — Service Worker
-const CACHE_NAME = 'korhaven-v2.9';
+const CACHE_NAME = 'korhaven-v3.1';
 
 const PRECACHE_ASSETS = [
   './',
@@ -124,7 +124,8 @@ self.addEventListener('push', (event) => {
     badge: 'assets/icon-192.png',
     vibrate: [100, 50, 100],
     data: {
-      url: data.url || './'
+      url: data.url || './',
+      noteId: data.noteId || null
     }
   };
 
@@ -136,21 +137,36 @@ self.addEventListener('push', (event) => {
 // Notification click
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const noteId = event.notification.data && event.notification.data.noteId;
-  const targetUrl = noteId ? `./#notes?noteId=${encodeURIComponent(noteId)}` : ((event.notification.data && event.notification.data.url) || './');
+  const data = event.notification.data || {};
+  const noteId = data.noteId;
+  const scopeUrl = self.registration.scope || new URL('./', self.location.href).href;
+
+  let targetUrl = scopeUrl;
+  if (noteId) {
+    targetUrl = `${scopeUrl}#notes?noteId=${encodeURIComponent(noteId)}`;
+  } else if (data.url && data.url !== './') {
+    const raw = String(data.url);
+    if (raw.startsWith('#')) {
+      targetUrl = `${scopeUrl}${raw}`;
+    } else if (raw.startsWith('./#')) {
+      targetUrl = `${scopeUrl}${raw.slice(2)}`;
+    } else {
+      targetUrl = new URL(raw, scopeUrl).href;
+    }
+  }
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
-        if (client.url.includes('index.html') && 'focus' in client) {
+        if (client.url.startsWith(scopeUrl) && !client.url.includes('service-worker.js') && 'focus' in client) {
           client.focus();
           client.postMessage({
             type: 'OPEN_FICHARIO',
             noteId: noteId,
             url: targetUrl
           });
-          if ('navigate' in client && targetUrl) {
-            return client.navigate(targetUrl);
+          if ('navigate' in client) {
+            return client.navigate(targetUrl).catch(() => {});
           }
           return;
         }
