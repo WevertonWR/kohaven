@@ -535,7 +535,12 @@ const PWA = {
       throw new Error('Permissão de notificação negada.');
     }
 
-    const keyRes = await fetch(`${baseUrl}/vapid-public-key`);
+    let keyRes;
+    try {
+      keyRes = await fetch(`${baseUrl}/vapid-public-key`);
+    } catch (e) {
+      throw new Error(`[1/4 Chave] ${e.message || 'Falha de rede'}`);
+    }
     if (!keyRes.ok) throw new Error('Não foi possível obter a chave pública do Worker.');
     const { publicKey } = await keyRes.json();
     if (!publicKey) throw new Error('VAPID_PUBLIC_KEY não configurada no Worker.');
@@ -555,19 +560,29 @@ const PWA = {
             'O navegador bloqueou o registro de Push (push service error). Verifique: 1) Não estar em Aba Anônima; 2) Se usar Brave, ative "Usar serviços do Google para mensagens push" nas configurações; 3) Desative VPN/AdGuard que bloqueie fcm.googleapis.com e teste no Chrome/Edge normal.'
           );
         }
-        throw subErr;
+        throw new Error(`[2/4 Assinatura] ${msg}`);
       }
     }
 
     this.savePushConfig({ workerUrl: baseUrl });
-    const syncInfo = await this.syncRemindersToWorker(sub);
+    let syncInfo;
+    try {
+      syncInfo = await this.syncRemindersToWorker(sub);
+    } catch (e) {
+      throw new Error(`[3/4 Sync] ${e.message || 'Falha de rede'}`);
+    }
 
     // Enviar push de teste real e verificar status do serviço FCM/APNs
-    const testRes = await fetch(`${baseUrl}/test`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subscription: sub.toJSON ? sub.toJSON() : sub })
-    });
+    let testRes;
+    try {
+      testRes = await fetch(`${baseUrl}/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription: sub.toJSON ? sub.toJSON() : sub })
+      });
+    } catch (e) {
+      throw new Error(`[4/4 Teste] ${e.message || 'Falha de rede'}`);
+    }
     const testData = await testRes.json().catch(() => ({}));
     if (!testRes.ok || testData.ok === false) {
       throw new Error(`Push rejeitado pelo servidor de destino (HTTP ${testData.status || testRes.status}).`);
